@@ -133,13 +133,17 @@ async fn status_handler(
 
     for name in all {
         if let Some(backend) = state.pool.get(&name).await {
+            let idle_secs = backend.last_request.elapsed().as_secs();
             let mut backend_json = serde_json::json!({
                 "name": backend.config.name,
                 "url": backend.config.url,
                 "priority": backend.config.priority,
                 "models": backend.models,
+                "model_count": backend.models.len(),
                 "current_model": backend.current_model,
                 "default_model": backend.config.default_model,
+                "idle_seconds": idle_secs,
+                "healthy": backend.healthy,
             });
 
             if let Some(gpu) = &backend.gpu_metrics {
@@ -217,98 +221,8 @@ herd_backend_gpu_temperature{{name="{}"}} {}
     metrics
 }
 
-async fn dashboard_handler(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> axum::response::Html<String> {
-    let all = state.pool.all().await;
-    let mut backends_html = String::new();
-
-    for name in all {
-        if let Some(backend) = state.pool.get(&name).await {
-            let status_class = if backend.healthy { "online" } else { "offline" };
-            let status_text = if backend.healthy { "Online" } else { "Offline" };
-            
-            let gpu_html = if let Some(gpu) = &backend.gpu_metrics {
-                format!(
-                    r#"<div class="gpu">
-                        <span>GPU: {:.0}%</span>
-                        <span>VRAM: {:.1}GB/{:.1}GB</span>
-                        <span>Temp: {:.0}°C</span>
-                    </div>"#,
-                    gpu.utilization,
-                    gpu.memory_used as f64 / 1024.0,
-                    gpu.memory_total as f64 / 1024.0,
-                    gpu.temperature
-                )
-            } else {
-                String::new()
-            };
-
-            let current_model = backend.current_model.as_deref().unwrap_or("None");
-            let default_model = backend.config.default_model.as_deref().unwrap_or("None");
-            let model_warning = if backend.current_model != backend.config.default_model && backend.config.default_model.is_some() {
-                r#"<div class="warning">⚠️ Model differs from default</div>"#
-            } else {
-                ""
-            };
-
-            backends_html.push_str(&format!(
-                r#"<div class="backend {}">
-                    <div class="header">
-                        <span class="name">{}</span>
-                        <span class="status {}">● {}</span>
-                    </div>
-                    <div class="info">
-                        <span>Priority: {}</span>
-                        <span>Models: {}</span>
-                    </div>
-                    {}
-                    <div class="models">
-                        <div>Current: <strong>{}</strong></div>
-                        <div>Default: {}</div>
-                    </div>
-                    {}
-                </div>"#,
-                status_class,
-                backend.config.name,
-                status_class, status_text,
-                backend.config.priority,
-                backend.models.len(),
-                gpu_html,
-                current_model,
-                default_model,
-                model_warning
-            ));
-        }
-    }
-
-    axum::response::Html(format!(r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Herd Dashboard</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }}
-        h1 {{ margin: 0 0 20px 0; }}
-        .backends {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }}
-        .backend {{ background: #16213e; border-radius: 8px; padding: 16px; border: 1px solid #0f3460; }}
-        .backend.offline {{ opacity: 0.6; border-color: #e94560; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }}
-        .name {{ font-size: 18px; font-weight: bold; }}
-        .status {{ font-size: 14px; }}
-        .status.online {{ color: #4ade80; }}
-        .status.offline {{ color: #e94560; }}
-        .info {{ display: flex; gap: 16px; color: #888; font-size: 14px; margin-bottom: 8px; }}
-        .gpu {{ display: flex; gap: 16px; color: #60a5fa; font-size: 13px; margin-bottom: 8px; }}
-        .models {{ font-size: 14px; margin-top: 8px; }}
-        .warning {{ color: #fbbf24; margin-top: 8px; font-size: 13px; }}
-        strong {{ color: #60a5fa; }}
-    </style>
-</head>
-<body>
-    <h1>🦙 Herd Dashboard</h1>
-    <div class="backends">{}</div>
-</body>
-</html>"#, backends_html))
+async fn dashboard_handler() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../dashboard.html"))
 }
 
 pub async fn run(config: Config) -> Result<()> {

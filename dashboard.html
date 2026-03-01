@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herd Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f1a;
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        /* Header */
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 24px; padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .header h1 { font-size: 28px; font-weight: 700; }
+        .header h1 span { margin-right: 8px; }
+        .header-meta { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #64748b; }
+        .strategy-badge {
+            background: rgba(99, 102, 241, 0.15); color: #818cf8;
+            padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .pulse { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Grid */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+
+        /* Card */
+        .card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px; padding: 20px;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .card:hover { border-color: rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
+        .card.offline { opacity: 0.5; border-color: rgba(239, 68, 68, 0.4); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .card-name { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+        .card-status { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+        .card-status.online { color: #4ade80; }
+        .card-status.offline { color: #ef4444; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; }
+        .dot.online { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.4); }
+        .dot.offline { background: #ef4444; }
+
+        /* Meta row */
+        .meta { display: flex; gap: 12px; margin-bottom: 12px; }
+        .meta-item {
+            font-size: 12px; color: #64748b;
+            background: rgba(255,255,255,0.04); padding: 3px 8px; border-radius: 6px;
+        }
+        .meta-item strong { color: #94a3b8; }
+
+        /* GPU bar */
+        .gpu-bar { margin-bottom: 12px; }
+        .gpu-bar-label { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 4px; }
+        .gpu-bar-track { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+        .gpu-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+        .gpu-bar-fill.low { background: #22c55e; }
+        .gpu-bar-fill.medium { background: #eab308; }
+        .gpu-bar-fill.high { background: #ef4444; }
+
+        /* GPU stats */
+        .gpu-stats { display: flex; gap: 12px; margin-bottom: 12px; }
+        .gpu-stat { font-size: 12px; color: #60a5fa; }
+
+        /* Model section */
+        .model-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.04); }
+        .model-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .model-label { font-size: 12px; color: #64748b; }
+        .model-value { font-size: 13px; font-weight: 600; color: #818cf8; }
+        .model-value.none { color: #475569; font-style: italic; }
+        .model-value.match { color: #4ade80; }
+
+        /* Idle timer */
+        .idle-timer {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 10px; padding: 6px 10px; border-radius: 6px;
+            font-size: 12px;
+        }
+        .idle-timer.warning { background: rgba(251, 191, 36, 0.08); color: #fbbf24; }
+        .idle-timer.ok { background: rgba(34, 197, 94, 0.08); color: #22c55e; }
+        .idle-timer.homing { background: rgba(239, 68, 68, 0.08); color: #ef4444; }
+
+        /* Footer */
+        .footer {
+            margin-top: 24px; padding-top: 16px;
+            border-top: 1px solid rgba(255,255,255,0.04);
+            display: flex; justify-content: space-between;
+            font-size: 12px; color: #475569;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span>🦙</span> Herd</h1>
+            <div class="header-meta">
+                <span class="strategy-badge" id="strategy">--</span>
+                <span>Idle timeout: <strong id="idle-timeout">--</strong>m</span>
+                <div class="pulse"></div>
+            </div>
+        </div>
+        <div class="grid" id="backends"></div>
+        <div class="footer">
+            <span id="last-update">Updating...</span>
+            <span>Herd v0.1.0</span>
+        </div>
+    </div>
+
+    <script>
+        function formatIdle(seconds) {
+            if (seconds < 60) return `${seconds}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+            return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+        }
+
+        function gpuClass(pct) {
+            if (pct < 50) return 'low';
+            if (pct < 80) return 'medium';
+            return 'high';
+        }
+
+        function renderCard(b, idleTimeout) {
+            const isOnline = b.healthy;
+            const cls = isOnline ? 'online' : 'offline';
+            const current = b.current_model || null;
+            const dflt = b.default_model || null;
+            const modelsMatch = current === dflt;
+            const idle = b.idle_seconds || 0;
+            const idleThresh = idleTimeout * 60;
+            const idlePct = dflt ? Math.min(100, Math.round((idle / idleThresh) * 100)) : 0;
+
+            let gpuHtml = '';
+            if (b.gpu) {
+                const g = b.gpu;
+                const usedGB = (g.memory_used / (1024*1024*1024)).toFixed(1);
+                const totalGB = (g.memory_total / (1024*1024*1024)).toFixed(1);
+                const pct = g.memory_total > 0 ? Math.round((g.memory_used / g.memory_total) * 100) : 0;
+                gpuHtml = `
+                    <div class="gpu-bar">
+                        <div class="gpu-bar-label"><span>GPU</span><span>${g.utilization.toFixed(0)}%</span></div>
+                        <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(g.utilization)}" style="width:${g.utilization}%"></div></div>
+                    </div>
+                    <div class="gpu-stats">
+                        <span class="gpu-stat">VRAM: ${usedGB}/${totalGB} GB (${pct}%)</span>
+                        <span class="gpu-stat">Temp: ${g.temperature.toFixed(0)}°C</span>
+                    </div>
+                `;
+            }
+
+            let idleHtml = '';
+            if (dflt && !modelsMatch) {
+                const remaining = Math.max(0, idleThresh - idle);
+                let timerClass = 'warning';
+                let label = `Returning to default in ${formatIdle(remaining)}`;
+                if (remaining <= 0) {
+                    timerClass = 'homing';
+                    label = '⏳ Homing to default model...';
+                }
+                idleHtml = `<div class="idle-timer ${timerClass}"><span>${label}</span><span>${idlePct}%</span></div>`;
+            } else if (dflt && modelsMatch) {
+                idleHtml = `<div class="idle-timer ok"><span>✓ Running default model</span><span>Idle: ${formatIdle(idle)}</span></div>`;
+            }
+
+            return `
+                <div class="card ${cls}">
+                    <div class="card-header">
+                        <span class="card-name">${b.name}</span>
+                        <span class="card-status ${cls}"><span class="dot ${cls}"></span>${isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    <div class="meta">
+                        <span class="meta-item">Priority: <strong>${b.priority}</strong></span>
+                        <span class="meta-item">Models: <strong>${b.model_count || b.models?.length || 0}</strong></span>
+                    </div>
+                    ${gpuHtml}
+                    <div class="model-section">
+                        <div class="model-row">
+                            <span class="model-label">Current Model</span>
+                            <span class="model-value ${current ? (modelsMatch ? 'match' : '') : 'none'}">${current || 'None'}</span>
+                        </div>
+                        <div class="model-row">
+                            <span class="model-label">Default Model</span>
+                            <span class="model-value" style="color:#94a3b8">${dflt || 'Not set'}</span>
+                        </div>
+                    </div>
+                    ${idleHtml}
+                </div>
+            `;
+        }
+
+        async function refresh() {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+                const all = [...(data.healthy_backends || []), ...(data.unhealthy_backends || [])];
+                const timeout = data.idle_timeout_minutes || 30;
+
+                document.getElementById('strategy').textContent = data.routing_strategy || '--';
+                document.getElementById('idle-timeout').textContent = timeout;
+                document.getElementById('backends').innerHTML = all.map(b => renderCard(b, timeout)).join('');
+                document.getElementById('last-update').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+            } catch (e) {
+                document.getElementById('last-update').textContent = `Error: ${e.message}`;
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>
