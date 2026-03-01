@@ -158,4 +158,32 @@ impl BackendPool {
             backend.last_request = Instant::now();
         }
     }
+
+    pub async fn add(&self, backend: Backend) {
+        let mut backends = self.backends.write().await;
+        backends.push(BackendState {
+            config: backend,
+            healthy: true,
+            models: Vec::new(),
+            current_model: None,
+            gpu_metrics: None,
+            failure_count: 0,
+            last_check: Instant::now(),
+            last_request: Instant::now(),
+        });
+    }
+
+    pub async fn update(&self, state: BackendState) {
+        let mut backends = self.backends.write().await;
+        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == state.config.name) {
+            *backend = state;
+        }
+    }
+
+    pub async fn remove(&self, name: &str) -> bool {
+        let mut backends = self.backends.write().await;
+        let len_before = backends.len();
+        backends.retain(|b| b.config.name != name);
+        backends.len() < len_before
+    }
 }

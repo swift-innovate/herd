@@ -1,3 +1,4 @@
+use crate::api::admin;
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
 use crate::config::Config;
 use crate::router::{create_router, Router};
@@ -66,12 +67,25 @@ impl Server {
             config: self.config.clone(),
         };
 
+        // Build admin sub-router
+        let admin_routes = axum::Router::new()
+            .route("/", axum::routing::get(admin::list_backends).post(admin::add_backend))
+            .route("/:name", axum::routing::get(admin::get_backend)
+                .put(admin::update_backend)
+                .delete(admin::remove_backend));
+
         // Build app with routes
         let app = axum::Router::new()
+            // Health check
             .route("/health", axum::routing::get(|| async { "OK" }))
+            // Status and metrics
             .route("/status", axum::routing::get(status_handler))
             .route("/metrics", axum::routing::get(metrics_handler))
+            // Dashboard
             .route("/dashboard", axum::routing::get(dashboard_handler))
+            // Admin API
+            .nest("/admin/backends", admin_routes)
+            // Proxy (catch-all)
             .fallback(proxy_handler)
             .layer(tower::ServiceBuilder::new().layer(TraceLayer::new_for_http()))
             .with_state(state);
