@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::Router;
+use crate::router::{Router, RoutedBackend};
 use async_trait::async_trait;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ impl PriorityRouter {
 
 #[async_trait]
 impl Router for PriorityRouter {
-    async fn route(&self, _model: Option<&str>) -> anyhow::Result<String> {
+    async fn route(&self, _model: Option<&str>) -> anyhow::Result<RoutedBackend> {
         // Route to highest priority healthy backend
         let backend = self
             .pool
@@ -23,6 +23,9 @@ impl Router for PriorityRouter {
             .await
             .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 
-        Ok(backend.config.url)
+        Ok(RoutedBackend {
+            name: backend.config.name.clone(),
+            url: backend.config.url.clone(),
+        })
     }
 }

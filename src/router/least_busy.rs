@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::Router;
+use crate::router::{Router, RoutedBackend};
 use async_trait::async_trait;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ impl LeastBusyRouter {
 
 #[async_trait]
 impl Router for LeastBusyRouter {
-    async fn route(&self, _model: Option<&str>) -> anyhow::Result<String> {
+    async fn route(&self, _model: Option<&str>) -> anyhow::Result<RoutedBackend> {
         // Route to least busy backend (by GPU utilization)
         let backend = self
             .pool
@@ -27,6 +27,9 @@ impl Router for LeastBusyRouter {
             "Routing to {} (least busy)",
             backend.config.name
         );
-        Ok(backend.config.url)
+        Ok(RoutedBackend {
+            name: backend.config.name.clone(),
+            url: backend.config.url.clone(),
+        })
     }
 }
