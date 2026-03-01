@@ -1,0 +1,49 @@
+# Herd Configuration Example
+# Copy to herd.yaml and customize
+
+server:
+  host: "0.0.0.0"
+  port: 40114
+
+routing:
+  strategy: "model_aware"  # priority | model_aware | least_busy
+  timeout: "120s"
+  retry_count: 2
+
+backends:
+  - name: "citadel-5090"
+    url: "http://citadel:11434"
+    priority: 100
+    gpu_hot_url: "http://citadel:1312"
+    tags:
+      - "local"
+      - "gpu"
+      - "high-vram"
+
+  - name: "minipc-4080"
+    url: "http://100.81.153.82:11434"
+    priority: 80
+    gpu_hot_url: "http://100.81.153.82:1312"
+    tags:
+      - "local"
+      - "gpu"
+      - "medium-vram"
+
+  - name: "warden-4070"
+    url: "http://100.106.188.105:11434"
+    priority: 50
+    model_filter: "≤8B"  # Only route small models here
+    tags:
+      - "local"
+      - "gpu"
+      - "low-vram"
+
+circuit_breaker:
+  failure_threshold: 3
+  timeout: "30s"
+  recovery_time: "60s"
+
+observability:
+  metrics: true
+  admin_api: true
+  tracing: false

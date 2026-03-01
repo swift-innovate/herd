@@ -1,0 +1,31 @@
+[package]
+name = "herd"
+version = "0.1.0"
+edition = "2021"
+authors = ["Swift Innovative Technologies"]
+description = "Intelligent Ollama router with GPU awareness"
+license = "MIT"
+repository = "https://github.com/swift-innovate/herd"
+keywords = ["ollama", "llm", "router", "load-balancer", "gpu"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+metrics = "0.21"
+metrics-exporter-prometheus = "0.12"
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
