@@ -78,6 +78,33 @@ observability:
 | `GET /health` | K8s liveness probe |
 | `POST /admin/backends` | Add/remove backends at runtime |
 
+## Model Homing
+
+Herd keeps idle nodes "warm" by loading their default model after the idle timeout:
+
+```yaml
+routing:
+  idle_timeout_minutes: 30
+
+backends:
+  - name: "citadel"
+    url: "http://citadel:11434"
+    default_model: "glm-4.7-flash:latest"
+```
+
+**How it works:**
+1. When a node sits idle for 30 minutes (no model loaded or running a non-default model)
+2. Herd sends a warmup request to load the default model
+3. Dashboard shows "Homing to default model..." with progress
+4. Once loaded, status shows "✓ Running default model"
+
+**Important:** After warming, Ollama may unload the model if no requests come in. This is expected - Ollama frees VRAM when idle. Herd will warm it again on the next cycle.
+
+**Dashboard indicators:**
+- 🟢 "Running default model" — Node is on its default model
+- 🟡 "Returning to default in 25m" — Active model differs from default, timer counting down
+- ⏳ "Homing to default model... 100%" — Warmup request sent, model loading/loaded
+
 ## GPU Awareness
 
 Herd integrates with [gpu-hot](https://github.com/psalias2006/gpu-hot) for real-time metrics:
