@@ -1,15 +1,18 @@
 use crate::config::Backend;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct BackendState {
     pub config: Backend,
     pub healthy: bool,
     pub models: Vec<String>,
+    pub current_model: Option<String>,
     pub gpu_metrics: Option<GpuMetrics>,
     pub failure_count: u32,
-    pub last_check: std::time::Instant,
+    pub last_check: Instant,
+    pub last_request: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -27,15 +30,18 @@ pub struct BackendPool {
 
 impl BackendPool {
     pub fn new(backends: Vec<Backend>) -> Self {
+        let now = Instant::now();
         let states = backends
             .into_iter()
             .map(|config| BackendState {
                 config,
                 healthy: true,
                 models: Vec::new(),
+                current_model: None,
                 gpu_metrics: None,
                 failure_count: 0,
-                last_check: std::time::Instant::now(),
+                last_check: now,
+                last_request: now,
             })
             .collect();
 
@@ -110,7 +116,7 @@ impl BackendPool {
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
             backend.healthy = true;
             backend.failure_count = 0;
-            backend.last_check = std::time::Instant::now();
+            backend.last_check = Instant::now();
         }
     }
 
@@ -121,7 +127,7 @@ impl BackendPool {
             if backend.failure_count >= 3 {
                 backend.healthy = false;
             }
-            backend.last_check = std::time::Instant::now();
+            backend.last_check = Instant::now();
         }
     }
 
@@ -132,10 +138,24 @@ impl BackendPool {
         }
     }
 
+    pub async fn update_current_model(&self, name: &str, model: Option<String>) {
+        let mut backends = self.backends.write().await;
+        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
+            backend.current_model = model;
+        }
+    }
+
     pub async fn update_gpu_metrics(&self, name: &str, metrics: GpuMetrics) {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
             backend.gpu_metrics = Some(metrics);
+        }
+    }
+
+    pub async fn touch_request(&self, name: &str) {
+        let mut backends = self.backends.write().await;
+        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
+            backend.last_request = Instant::now();
         }
     }
 }

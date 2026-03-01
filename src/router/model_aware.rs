@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::Router;
+use crate::router::{Router, RoutedBackend};
 use async_trait::async_trait;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ impl ModelAwareRouter {
 
 #[async_trait]
 impl Router for ModelAwareRouter {
-    async fn route(&self, model: Option<&str>) -> anyhow::Result<String> {
+    async fn route(&self, model: Option<&str>) -> anyhow::Result<RoutedBackend> {
         // If model specified, try to find backend with model loaded
         if let Some(model_name) = model {
             if let Some(backend) = self.pool.get_by_model(model_name).await {
@@ -24,7 +24,10 @@ impl Router for ModelAwareRouter {
                     model_name,
                     backend.config.name
                 );
-                return Ok(backend.config.url);
+                return Ok(RoutedBackend {
+                    name: backend.config.name.clone(),
+                    url: backend.config.url.clone(),
+                });
             }
         }
 
@@ -39,6 +42,9 @@ impl Router for ModelAwareRouter {
             "Routing to {} (no model preference)",
             backend.config.name
         );
-        Ok(backend.config.url)
+        Ok(RoutedBackend {
+            name: backend.config.name.clone(),
+            url: backend.config.url.clone(),
+        })
     }
 }

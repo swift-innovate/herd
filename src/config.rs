@@ -52,6 +52,9 @@ pub struct RoutingConfig {
     
     #[serde(default = "default_retry_count")]
     pub retry_count: u32,
+    
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_minutes: u64,
 }
 
 impl Default for RoutingConfig {
@@ -60,6 +63,7 @@ impl Default for RoutingConfig {
             strategy: default_strategy(),
             timeout: default_timeout(),
             retry_count: default_retry_count(),
+            idle_timeout_minutes: default_idle_timeout(),
         }
     }
 }
@@ -76,15 +80,19 @@ pub enum RoutingStrategy {
     LeastBusy,
 }
 
-fn default_strategy() -> RoutingStrategy { RoutingStrategy::Priority }
+fn default_strategy() -> RoutingStrategy { RoutingStrategy::ModelAware }
 fn default_timeout() -> String { "120s".to_string() }
 fn default_retry_count() -> u32 { 2 }
+fn default_idle_timeout() -> u64 { 30 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Backend {
     pub name: String,
     pub url: String,
     pub priority: u32,
+    
+    #[serde(default)]
+    pub default_model: Option<String>,
     
     #[serde(default)]
     pub gpu_hot_url: Option<String>,
@@ -102,6 +110,7 @@ impl Default for Backend {
             name: String::new(),
             url: String::new(),
             priority: 50,
+            default_model: None,
             gpu_hot_url: None,
             model_filter: None,
             tags: Vec::new(),

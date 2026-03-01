@@ -1,4 +1,5 @@
 use crate::backend::{BackendPool, GpuMetrics};
+use crate::config::Backend;
 use anyhow::Result;
 use serde::Deserialize;
 use std::time::Duration;
@@ -16,6 +17,18 @@ struct OllamaModel {
 }
 
 #[derive(Debug, Deserialize)]
+struct OllamaRunning {
+    models: Vec<OllamaRunningModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaRunningModel {
+    name: String,
+    #[serde(default)]
+    model: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct GpuHotData {
     gpus: Vec<GpuInfo>,
 }
@@ -24,6 +37,7 @@ struct GpuHotData {
 struct GpuInfo {
     #[serde(rename = "index")]
     _index: u32,
+    #[allow(dead_code)]
     name: String,
     utilization: f32,
     memory_used: u64,
@@ -66,10 +80,15 @@ impl ModelDiscovery {
                     tracing::warn!("Failed to discover models for {}: {}", name, e);
                 }
 
+                // Discover currently loaded model
+                if let Err(e) = self.discover_running(&pool, &state.config).await {
+                    tracing::trace!("No running model on {}: {}", name, e);
+                }
+
                 // Discover GPU metrics if configured
                 if let Some(ref gpu_url) = state.config.gpu_hot_url {
                     if let Err(e) = self.discover_gpu_metrics(&pool, &name, gpu_url).await {
-                        tracing::warn!("Failed to get GPU metrics for {}: {}", name, e);
+                        tracing::trace!("Failed to get GPU metrics for {}: {}", name, e);
                     }
                 }
             }
@@ -77,7 +96,7 @@ impl ModelDiscovery {
         info!("Model discovery complete");
     }
 
-    async fn discover_models(&self, pool: &BackendPool, backend: &crate::config::Backend) -> Result<()> {
+    async fn discover_models(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
         let url = format!("{}/api/tags", backend.url);
         let resp = self.client.get(&url).send().await?;
         let models: OllamaModels = resp.json().await?;
@@ -85,6 +104,24 @@ impl ModelDiscovery {
         let model_names: Vec<String> = models.models.into_iter().map(|m| m.name).collect();
         pool.update_models(&backend.name, model_names).await;
 
+        Ok(())
+    }
+
+    async fn discover_running(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
+        let url = format!("{}/api/ps", backend.url);
+        let resp = self.client.get(&url).send().await?;
+        let running: OllamaRunning = resp.json().await?;
+
+        // Get the first running model (if any)
+        let current = running.models.first().map(|m| {
+            if m.model.is_empty() {
+                m.name.clone()
+            } else {
+                m.model.clone()
+            }
+        });
+
+        pool.update_current_model(&backend.name, current).await;
         Ok(())
     }
 
