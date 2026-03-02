@@ -1,3 +1,4 @@
+use crate::analytics::{Analytics, RequestLog};
 use crate::api::admin;
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
 use crate::config::Config;
@@ -7,6 +8,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use chrono::Timelike;
 
 pub struct Server {
     config: Config,
@@ -18,6 +20,7 @@ pub struct AppState {
     pub router: crate::router::RouterEnum,
     pub client: Arc<reqwest::Client>,
     pub config: Config,
+    pub analytics: Arc<Analytics>,
 }
 
 impl Server {
@@ -53,6 +56,27 @@ impl Server {
             homing.spawn(pool_clone).await;
         });
 
+        // Initialize analytics
+        let analytics = Arc::new(Analytics::new()?);
+        
+        // Start 7-day cleanup task (runs daily at 3 AM)
+        let analytics_clone = Arc::clone(&analytics);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await; // Every hour
+                let now = chrono::Local::now();
+                let hour = now.hour();
+                let minute = now.minute();
+                if hour == 3 && minute < 5 {
+                    if let Err(e) = analytics_clone.cleanup_old(7) {
+                        tracing::error!("Failed to cleanup old analytics: {}", e);
+                    } else {
+                        tracing::info!("Cleaned up analytics logs older than 7 days");
+                    }
+                }
+            }
+        });
+
         // Create router
         let router = create_router(self.config.routing.strategy.clone(), pool.clone());
 
@@ -65,6 +89,7 @@ impl Server {
             router,
             client: Arc::clone(&client),
             config: self.config.clone(),
+            analytics,
         };
 
         // Build admin sub-router
@@ -81,6 +106,8 @@ impl Server {
             // Status and metrics
             .route("/status", axum::routing::get(status_handler))
             .route("/metrics", axum::routing::get(metrics_handler))
+            .route("/analytics", axum::routing::get(analytics_handler))
+            .route("/update", axum::routing::get(update_check_handler))
             // Dashboard
             .route("/dashboard", axum::routing::get(dashboard_handler))
             // Admin API
@@ -101,18 +128,24 @@ impl Server {
 async fn proxy_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,
-) -> Result<String, axum::http::StatusCode> {
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let start = std::time::Instant::now();
+    
+    // Extract model from request if it's a generation request
+    let path = request.uri().path().to_string();
+    let mut model_name: Option<String> = None;
+    
     // Route request
     let backend = state
         .router
-        .route(None)
+        .route(model_name.as_deref())
         .await
         .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Touch the backend to update last_request time
     state.pool.touch_request(&backend.name).await;
 
-    let url = format!("{}{}", backend.url, request.uri().path());
+    let url = format!("{}{}", backend.url, path);
     
     // Get method from original request
     let method = match *request.method() {
@@ -127,15 +160,52 @@ async fn proxy_handler(
         .await
         .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
 
+    // Try to extract model from body for logging
+    if path.contains("/api/generate") || path.contains("/api/chat") {
+        if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            if let Some(model) = body_json.get("model").and_then(|m| m.as_str()) {
+                model_name = Some(model.to_string());
+            }
+        }
+    }
+
     let response = state
         .client
         .request(method, &url)
         .body(body_bytes)
         .send()
-        .await
-        .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
+        .await;
 
-    response.text().await.map_err(|_| axum::http::StatusCode::BAD_GATEWAY)
+    let duration = start.elapsed();
+    let status = if response.is_ok() { "success" } else { "error" };
+    
+    // Log request
+    let log = RequestLog {
+        timestamp: chrono::Utc::now().timestamp(),
+        model: model_name,
+        backend: backend.name.clone(),
+        duration_ms: duration.as_millis() as u64,
+        status: status.to_string(),
+        path: path.clone(),
+    };
+    
+    if let Err(e) = state.analytics.log_request(log).await {
+        tracing::error!("Failed to log request: {}", e);
+    }
+
+    match response {
+        Ok(r) => {
+            let status_code = axum::http::StatusCode::from_u16(r.status().as_u16()).unwrap_or(axum::http::StatusCode::OK);
+            let body = r.bytes().await.map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
+            
+            let response = axum::response::Response::builder()
+                .status(status_code)
+                .body(axum::body::Body::from(body))
+                .unwrap();
+            Ok(response)
+        },
+        Err(_) => Err(axum::http::StatusCode::BAD_GATEWAY)
+    }
 }
 
 async fn status_handler(
@@ -233,6 +303,61 @@ herd_backend_gpu_temperature{{name="{}"}} {}
     }
 
     metrics
+}
+
+async fn analytics_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::Json<serde_json::Value> {
+    let hours = params.get("hours")
+        .and_then(|h| h.parse::<i64>().ok())
+        .unwrap_or(24);
+    
+    let seconds = hours * 3600;
+    
+    match state.analytics.get_stats(seconds) {
+        Ok(stats) => axum::Json(serde_json::to_value(&stats).unwrap()),
+        Err(e) => axum::Json(serde_json::json!({
+            "error": format!("Failed to get analytics: {}", e)
+        }))
+    }
+}
+
+async fn update_check_handler() -> axum::Json<serde_json::Value> {
+    const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+    const REPO: &str = "swift-innovate/herd";
+    
+    let client = reqwest::Client::new();
+    let url = format!("https://api.github.com/repos/{}/releases/latest", REPO);
+    
+    match client.get(&url)
+        .header("User-Agent", "Herd")
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if let Ok(release) = response.json::<serde_json::Value>().await {
+                let latest = release["tag_name"].as_str().unwrap_or(CURRENT_VERSION).trim_start_matches('v');
+                axum::Json(serde_json::json!({
+                    "current": CURRENT_VERSION,
+                    "latest": latest,
+                    "update_available": latest != CURRENT_VERSION,
+                    "download_url": release["html_url"].as_str(),
+                }))
+            } else {
+                axum::Json(serde_json::json!({
+                    "current": CURRENT_VERSION,
+                    "error": "Failed to parse release info"
+                }))
+            }
+        },
+        Err(e) => {
+            axum::Json(serde_json::json!({
+                "current": CURRENT_VERSION,
+                "error": format!("Failed to check for updates: {}", e)
+            }))
+        }
+    }
 }
 
 async fn dashboard_handler() -> axum::response::Html<&'static str> {

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Herd Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -12,7 +13,7 @@
             color: #e2e8f0;
             min-height: 100vh;
         }
-        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
         .header {
             display: flex; justify-content: space-between; align-items: center;
@@ -30,6 +31,12 @@
         }
         .pulse { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .update-badge {
+            background: rgba(251, 191, 36, 0.15); color: #fbbf24;
+            padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+            cursor: pointer;
+        }
+        .update-badge:hover { background: rgba(251, 191, 36, 0.25); }
 
         .btn {
             background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);
@@ -41,7 +48,7 @@
         .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
         .btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 32px; }
 
         .card {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -92,6 +99,36 @@
         .idle-timer.warning { background: rgba(251, 191, 36, 0.08); color: #fbbf24; }
         .idle-timer.ok { background: rgba(34, 197, 94, 0.08); color: #22c55e; }
         .idle-timer.homing { background: rgba(239, 68, 68, 0.08); color: #ef4444; }
+
+        /* Analytics Charts Section */
+        .analytics-section {
+            margin-bottom: 32px;
+        }
+        .section-header {
+            font-size: 20px; font-weight: 700; margin-bottom: 16px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 16px;
+        }
+        .chart-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .chart-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 12px;
+        }
+        .chart-container {
+            position: relative;
+            height: 200px;
+        }
 
         .footer {
             margin-top: 24px; padding-top: 16px;
@@ -147,14 +184,44 @@
                     <span class="strategy-badge" id="strategy">--</span>
                     <span>Idle: <strong id="idle-timeout">--</strong>m</span>
                     <div class="pulse"></div>
+                    <span id="update-badge" class="update-badge" style="display:none;"></span>
                 </div>
                 <button class="btn" onclick="openAddModal()">+ Add Node</button>
             </div>
         </div>
+        
         <div class="grid" id="backends"></div>
+
+        <!-- Analytics Charts -->
+        <div class="analytics-section">
+            <div class="section-header">
+                <span>📊 Analytics (Last 24h)</span>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <div class="chart-title">Request Volume</div>
+                    <div class="chart-container">
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">By Model</div>
+                    <div class="chart-container">
+                        <canvas id="modelChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">By Backend</div>
+                    <div class="chart-container">
+                        <canvas id="backendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="footer">
             <span id="last-update">Updating...</span>
-            <span>Herd v0.1.0</span>
+            <span id="version-info">Herd v0.1.0</span>
         </div>
     </div>
 
@@ -185,6 +252,8 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        let timelineChart, modelChart, backendChart;
+
         function formatIdle(seconds) {
             if (seconds < 60) return `${seconds}s`;
             if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
@@ -352,6 +421,125 @@
             `;
         }
 
+        function initCharts() {
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                }
+            };
+
+            // Timeline chart (line)
+            timelineChart = new Chart(document.getElementById('timelineChart'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Requests',
+                        data: [],
+                        borderColor: '#818cf8',
+                        backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    ...chartOptions,
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                        x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0 } }
+                    }
+                }
+            });
+
+            // Model chart (bar)
+            modelChart = new Chart(document.getElementById('modelChart'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Requests',
+                        data: [],
+                        backgroundColor: '#818cf8',
+                    }]
+                },
+                options: {
+                    ...chartOptions,
+                    indexAxis: 'y',
+                    scales: {
+                        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                        y: { grid: { display: false }, ticks: { color: '#64748b' } }
+                    }
+                }
+            });
+
+            // Backend chart (bar)
+            backendChart = new Chart(document.getElementById('backendChart'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Requests',
+                        data: [],
+                        backgroundColor: '#4ade80',
+                    }]
+                },
+                options: {
+                    ...chartOptions,
+                    indexAxis: 'y',
+                    scales: {
+                        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                        y: { grid: { display: false }, ticks: { color: '#64748b' } }
+                    }
+                }
+            });
+        }
+
+        async function updateCharts() {
+            try {
+                const res = await fetch('/analytics?hours=24');
+                const data = await res.json();
+
+                // Timeline chart
+                const times = data.timeline.map(t => new Date(t[0] * 1000).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}));
+                const counts = data.timeline.map(t => t[1]);
+                timelineChart.data.labels = times.slice(-20); // Last 20 data points
+                timelineChart.data.datasets[0].data = counts.slice(-20);
+                timelineChart.update();
+
+                // Model chart (top 5)
+                const models = Object.entries(data.model_counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                modelChart.data.labels = models.map(m => m[0].split(':')[0]);
+                modelChart.data.datasets[0].data = models.map(m => m[1]);
+                modelChart.update();
+
+                // Backend chart
+                const backends = Object.entries(data.backend_counts).sort((a, b) => b[1] - a[1]);
+                backendChart.data.labels = backends.map(b => b[0]);
+                backendChart.data.datasets[0].data = backends.map(b => b[1]);
+                backendChart.update();
+            } catch (e) {
+                console.error('Failed to update charts:', e);
+            }
+        }
+
+        async function checkUpdate() {
+            try {
+                const res = await fetch('/update');
+                const data = await res.json();
+                if (data.update_available) {
+                    const badge = document.getElementById('update-badge');
+                    badge.textContent = `v${data.latest} available`;
+                    badge.style.display = 'inline-block';
+                    badge.onclick = () => window.open(data.download_url, '_blank');
+                }
+                document.getElementById('version-info').textContent = `Herd v${data.current}`;
+            } catch (e) {
+                console.error('Update check failed:', e);
+            }
+        }
+
         async function refresh() {
             try {
                 const res = await fetch('/status');
@@ -374,8 +562,13 @@
             if (e.target === e.currentTarget) closeModal();
         });
 
+        // Initialize
+        initCharts();
         refresh();
+        updateCharts();
+        checkUpdate();
         setInterval(refresh, 5000);
+        setInterval(updateCharts, 30000); // Update charts every 30s
     </script>
 </body>
 </html>
