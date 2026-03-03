@@ -548,6 +548,43 @@
             }
         }
 
+        async function fetchGPU() {
+            try {
+                const r = await fetch('/gpu');
+                const data = await r.json();
+                if (data.available === false) {
+                    document.getElementById('gpu-section').style.display = 'none';
+                    return;
+                }
+                document.getElementById('gpu-section').style.display = 'block';
+                renderGPU(data);
+            } catch (e) {
+                document.getElementById('gpu-section').style.display = 'none';
+            }
+        }
+
+        function renderGPU(data) {
+            const gpus = data.gpus || {};
+            const cards = Object.values(gpus).map(gpu => `
+                <div class="card">
+                    <div class="card-header">
+                        <span><strong>${gpu.name || 'GPU'}</strong></span>
+                        <span class="badge badge-${gpu.utilization < 50 ? 'success' : gpu.utilization < 80 ? 'warning' : 'danger'}">
+                            ${gpu.utilization}% Util
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex;gap:16px;font-size:13px;">
+                            <span>🌡️ ${gpu.temperature}°C</span>
+                            <span>💾 ${Math.round(gpu.memory_used/1024)}/${Math.round(gpu.memory_total/1024)}GB</span>
+                            <span>⚡ ${Math.round(gpu.power_draw)}W</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('gpu-cards').innerHTML = cards;
+        }
+
         async function refresh() {
             try {
                 const res = await fetch('/status');
@@ -575,8 +612,10 @@
         refresh();
         updateCharts();
         checkUpdate();
+        fetchGPU();
         setInterval(refresh, 5000);
-        setInterval(updateCharts, 30000); // Update charts every 30s
+        setInterval(updateCharts, 30000);
+        setInterval(fetchGPU, 10000); // GPU refresh every 10s
     </script>
 </body>
 </html>
