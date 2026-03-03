@@ -198,6 +198,38 @@ backends:
     gpu_hot_url: "http://citadel:1312"
 ```
 
+**Dashboard GPU section:**
+- Displays per-GPU cards with utilization, temperature, memory, power draw
+- Auto-polls every 10 seconds
+- Automatically hides if gpu-hot is unreachable
+- Shows all GPUs on multi-GPU nodes
+
+**Example output:**
+```json
+{
+  "available": true,
+  "gpus": {
+    "0": {
+      "name": "NVIDIA GeForce RTX 5090",
+      "temperature": 37.0,
+      "utilization": 2.0,
+      "memory_used": 3731.48,
+      "memory_total": 32607.0,
+      "power_draw": 70.0
+    }
+  }
+}
+```
+
+Then configure Herd to query metrics:
+
+```yaml
+backends:
+  - name: "citadel"
+    url: "http://citadel:11434"
+    gpu_hot_url: "http://citadel:1312"
+```
+
 Herd will route based on:
 - Model already loaded (via `/api/ps`)
 - GPU VRAM available
