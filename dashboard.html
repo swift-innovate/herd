@@ -192,14 +192,6 @@
         
         <div class="grid" id="backends"></div>
 
-        <!-- GPU Monitoring -->
-        <div class="analytics-section" id="gpu-section" style="display:none;">
-            <div class="section-header">
-                <span>🔥 GPU Monitoring</span>
-            </div>
-            <div class="grid" id="gpu-cards"></div>
-        </div>
-
         <!-- Analytics Charts -->
         <div class="analytics-section">
             <div class="section-header">
@@ -242,7 +234,7 @@
             <label for="f-name">Name</label>
             <input id="f-name" placeholder="e.g. my-server">
             <label for="f-url">URL</label>
-            <input id="f-url" placeholder="http://192.168.1.x:11434">
+            <input id="f-url" placeholder="http://100.x.x.x:11434">
             <label for="f-priority">Priority (higher = preferred)</label>
             <input id="f-priority" type="number" value="50" min="1" max="200">
             <label for="f-default">Default Model</label>
@@ -373,16 +365,19 @@
             let gpuHtml = '';
             if (b.gpu) {
                 const g = b.gpu;
-                const usedGB = (g.memory_used / (1024*1024*1024)).toFixed(1);
-                const totalGB = (g.memory_total / (1024*1024*1024)).toFixed(1);
+                const usedGB = (g.memory_used / 1024).toFixed(1);
+                const totalGB = (g.memory_total / 1024).toFixed(1);
                 const pct = g.memory_total > 0 ? Math.round((g.memory_used / g.memory_total) * 100) : 0;
                 gpuHtml = `
                     <div class="gpu-bar">
-                        <div class="gpu-bar-label"><span>GPU</span><span>${g.utilization.toFixed(0)}%</span></div>
+                        <div class="gpu-bar-label"><span>GPU Utilization</span><span>${g.utilization.toFixed(0)}%</span></div>
                         <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(g.utilization)}" style="width:${g.utilization}%"></div></div>
                     </div>
+                    <div class="gpu-bar">
+                        <div class="gpu-bar-label"><span>VRAM</span><span>${usedGB} / ${totalGB} GB (${pct}%)</span></div>
+                        <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(pct)}" style="width:${pct}%"></div></div>
+                    </div>
                     <div class="gpu-stats">
-                        <span class="gpu-stat">VRAM: ${usedGB}/${totalGB} GB (${pct}%)</span>
                         <span class="gpu-stat">Temp: ${g.temperature.toFixed(0)}°C</span>
                     </div>
                 `;
@@ -548,43 +543,6 @@
             }
         }
 
-        async function fetchGPU() {
-            try {
-                const r = await fetch('/gpu');
-                const data = await r.json();
-                if (data.available === false) {
-                    document.getElementById('gpu-section').style.display = 'none';
-                    return;
-                }
-                document.getElementById('gpu-section').style.display = 'block';
-                renderGPU(data);
-            } catch (e) {
-                document.getElementById('gpu-section').style.display = 'none';
-            }
-        }
-
-        function renderGPU(data) {
-            const gpus = data.gpus || {};
-            const cards = Object.values(gpus).map(gpu => `
-                <div class="card">
-                    <div class="card-header">
-                        <span><strong>${gpu.name || 'GPU'}</strong></span>
-                        <span class="badge badge-${gpu.utilization < 50 ? 'success' : gpu.utilization < 80 ? 'warning' : 'danger'}">
-                            ${gpu.utilization}% Util
-                        </span>
-                    </div>
-                    <div class="card-body">
-                        <div style="display:flex;gap:16px;font-size:13px;">
-                            <span>🌡️ ${gpu.temperature}°C</span>
-                            <span>💾 ${Math.round(gpu.memory_used/1024)}/${Math.round(gpu.memory_total/1024)}GB</span>
-                            <span>⚡ ${Math.round(gpu.power_draw)}W</span>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            document.getElementById('gpu-cards').innerHTML = cards;
-        }
-
         async function refresh() {
             try {
                 const res = await fetch('/status');
@@ -612,10 +570,8 @@
         refresh();
         updateCharts();
         checkUpdate();
-        fetchGPU();
         setInterval(refresh, 5000);
         setInterval(updateCharts, 30000);
-        setInterval(fetchGPU, 10000); // GPU refresh every 10s
     </script>
 </body>
 </html>
