@@ -85,10 +85,25 @@ impl ModelDiscovery {
                     tracing::trace!("No running model on {}: {}", name, e);
                 }
 
-                // Discover GPU metrics if configured
-                if let Some(ref gpu_url) = state.config.gpu_hot_url {
+                // Discover GPU metrics via explicit gpu_hot_url, or auto-derive from backend host on port 1312
+                let gpu_url = if let Some(ref configured) = state.config.gpu_hot_url {
+                    Some(configured.clone())
+                } else {
+                    let host = state.config.url
+                        .trim_start_matches("http://")
+                        .trim_start_matches("https://")
+                        .split(':')
+                        .next()
+                        .unwrap_or("");
+                    if !host.is_empty() {
+                        Some(format!("http://{}:1312", host))
+                    } else {
+                        None
+                    }
+                };
+                if let Some(ref gpu_url) = gpu_url {
                     if let Err(e) = self.discover_gpu_metrics(&pool, &name, gpu_url).await {
-                        tracing::trace!("Failed to get GPU metrics for {}: {}", name, e);
+                        tracing::trace!("No gpu-hot on {}: {}", name, e);
                     }
                 }
             }
