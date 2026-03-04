@@ -364,21 +364,59 @@ async fn update_check_handler() -> axum::Json<serde_json::Value> {
 async fn gpu_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> axum::Json<serde_json::Value> {
-    // Try to fetch GPU data from hot-gpu at 100.107.157.73:1312
-    match state
-        .client
-        .get("http://100.107.157.73:1312/api/gpu-data")
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(data) => axum::Json(data),
-                Err(_) => axum::Json(serde_json::json!({"available": false, "error": "Failed to parse GPU data"})),
+    // Query all healthy backends for GPU data via gpu-hot (port 1312)
+    let backends = state.pool.all_healthy().await;
+    let mut gpu_data = std::collections::HashMap::new();
+    
+    for name in backends {
+        if let Some(backend) = state.pool.get(&name).await {
+            // Use configured gpu_hot_url, or derive from backend host on port 1312
+            let gpu_url = if let Some(ref base) = backend.config.gpu_hot_url {
+                let base = base.trim_end_matches('/');
+                format!("{}/api/gpu-data", base)
+            } else {
+                let host = backend.config.url
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .split(':')
+                    .next()
+                    .unwrap_or("");
+                if host.is_empty() {
+                    continue;
+                }
+                format!("http://{}:1312/api/gpu-data", host)
+            };
+            
+            match state
+                .client
+                .get(&gpu_url)
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(data) = resp.json::<serde_json::Value>().await {
+                        gpu_data.insert(name.clone(), data);
+                    }
+                }
+                _ => {
+                    // Backend doesn't have gpu-hot or it's not responding
+                    tracing::trace!("No gpu-hot data from {}", name);
+                }
             }
         }
-        _ => axum::Json(serde_json::json!({"available": false, "error": "hot-gpu not reachable"})),
+    }
+    
+    if gpu_data.is_empty() {
+        axum::Json(serde_json::json!({
+            "available": false,
+            "error": "No gpu-hot endpoints available"
+        }))
+    } else {
+        axum::Json(serde_json::json!({
+            "available": true,
+            "backends": gpu_data
+        }))
     }
 }
 
