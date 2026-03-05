@@ -3,6 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/swift-innovate/herd?style=social)](https://github.com/swift-innovate/herd/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
+[![Roadmap](https://img.shields.io/badge/roadmap-v0.3%20agent%20gateway-blue)](ROADMAP.md)
 
 **Intelligent Ollama router with GPU awareness, analytics, and real-time monitoring.**
 
@@ -28,6 +29,8 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Latency tracking** — P50, P95, P99 percentiles
 - **Update checker** — Automatic GitHub release notifications
 - **Prometheus metrics** — `/metrics` endpoint for Grafana
+
+> **Herd is growing.** Multi-agent orchestration, session management, and a permission engine are coming in v0.3.0. See the [Roadmap](ROADMAP.md).
 
 ## Quick Start
 
