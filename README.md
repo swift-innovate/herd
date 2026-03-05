@@ -6,7 +6,7 @@
 
 **Intelligent Ollama router with GPU awareness, analytics, and real-time monitoring.**
 
-Route your llama herd with intelligence — priority routing, circuit breakers, model awareness, real-time GPU metrics, and beautiful dashboards.
+Route your llama herd with intelligence — priority routing, circuit breakers, model awareness, real-time GPU metrics, beautiful dashboards, and OpenAI-compatible endpoints.
 
 ## Features
 
@@ -16,6 +16,7 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Model-aware** — Route to nodes with models already loaded
 - **Model homing** — Auto-load default models on idle nodes
 - **Hot reload** — Add/remove nodes without restart via API
+- **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint for any OpenAI client
 
 ### Observability (New in v0.2.0) 📊
 - **Request analytics** — JSONL logging with 7-day auto-retention
@@ -84,14 +85,36 @@ observability:
 
 ## API Endpoints
 
+### OpenAI-Compatible Endpoints
+
+Point any OpenAI client at Herd and get full model-aware routing across your cluster:
+
+```bash
+# Works with OpenAI SDK, Open WebUI, Continue.dev, LiteLLM, Cursor, etc.
+base_url: http://herd:40114/v1
+api_key: anything   # Ollama doesn't require auth; any value works
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /v1/models` | List all models from healthy backends |
+| `POST /v1/chat/completions` | Chat completions (streaming supported) |
+| `POST /v1/completions` | Text completions (streaming supported) |
+
+All `/v1/*` requests use the same intelligent routing as native Ollama calls — model-aware, priority-based, with circuit breakers.
+
+### All Endpoints
+
 | Endpoint | Description |
 |----------|-------------|
 | `GET /` | Proxy to highest priority backend |
 | `POST /api/*` | Forward Ollama API requests |
-| `GET /dashboard` | Interactive analytics dashboard 📊 **New!** |
+| `GET /v1/models` | OpenAI-compatible model list |
+| `POST /v1/chat/completions` | OpenAI-compatible chat (streaming) |
+| `GET /dashboard` | Interactive analytics dashboard |
 | `GET /status` | Node health + GPU metrics (JSON) |
-| `GET /analytics?hours=N` | Request stats, latency, timeline **New!** |
-| `GET /update` | Check for new releases **New!** |
+| `GET /analytics?hours=N` | Request stats, latency, timeline |
+| `GET /update` | Check for new releases |
 | `GET /metrics` | Prometheus metrics |
 | `GET /health` | K8s liveness probe |
 | `POST /admin/backends` | Add backend at runtime |
@@ -268,11 +291,21 @@ Herd will route based on:
 | Observability API | ✅ | ❌ |
 | Retry with fallback | ✅ | ❌ |
 | Admin API | ✅ | ❌ |
+| OpenAI-compatible API | ✅ | ❌ |
+| Streaming completions | ✅ | ❌ |
 | Language | Rust | Go |
 
 ## License
 
 MIT
+
+## Support
+
+If Herd is useful to you, consider sponsoring development:
+
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/swift-innovate?style=social)](https://github.com/sponsors/swift-innovate)
+
+Your support helps keep the project maintained and moving forward. Thank you!
 
 ---
 

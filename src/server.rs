@@ -1,5 +1,5 @@
 use crate::analytics::{Analytics, RequestLog};
-use crate::api::admin;
+use crate::api::{admin, openai};
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
 use crate::config::Config;
 use crate::router::{create_router, Router};
@@ -111,6 +111,8 @@ impl Server {
             .route("/gpu", axum::routing::get(gpu_handler))
             // Dashboard
             .route("/dashboard", axum::routing::get(dashboard_handler))
+            // OpenAI-compatible API
+            .route("/v1/models", axum::routing::get(openai::list_models))
             // Admin API
             .nest("/admin/backends", admin_routes)
             // Proxy (catch-all)
@@ -161,8 +163,11 @@ async fn proxy_handler(
         .await
         .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
 
-    // Try to extract model from body for logging
-    if path.contains("/api/generate") || path.contains("/api/chat") {
+    // Try to extract model from body for routing and logging.
+    // Covers both Ollama-native (/api/generate, /api/chat) and OpenAI-compat paths.
+    if path.contains("/api/generate") || path.contains("/api/chat")
+        || path.contains("/v1/chat/completions") || path.contains("/v1/completions")
+    {
         if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             if let Some(model) = body_json.get("model").and_then(|m| m.as_str()) {
                 model_name = Some(model.to_string());
@@ -196,14 +201,21 @@ async fn proxy_handler(
 
     match response {
         Ok(r) => {
-            let status_code = axum::http::StatusCode::from_u16(r.status().as_u16()).unwrap_or(axum::http::StatusCode::OK);
-            let body = r.bytes().await.map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
-            
-            let response = axum::response::Response::builder()
-                .status(status_code)
-                .body(axum::body::Body::from(body))
-                .unwrap();
-            Ok(response)
+            let status_code = axum::http::StatusCode::from_u16(r.status().as_u16())
+                .unwrap_or(axum::http::StatusCode::OK);
+
+            let mut builder = axum::response::Response::builder().status(status_code);
+
+            // Forward response headers so streaming (SSE) clients receive
+            // Content-Type: text/event-stream and can parse chunks correctly.
+            for (name, value) in r.headers() {
+                builder = builder.header(name, value);
+            }
+
+            // Stream the body instead of buffering — required for streaming
+            // completions (/v1/chat/completions with stream:true, /api/generate, etc.)
+            let body = axum::body::Body::from_stream(r.bytes_stream());
+            Ok(builder.body(body).unwrap())
         },
         Err(_) => Err(axum::http::StatusCode::BAD_GATEWAY)
     }

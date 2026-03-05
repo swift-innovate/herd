@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod openai;
 pub mod status;
 
 // Re-export handlers for convenience
