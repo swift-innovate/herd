@@ -9,13 +9,13 @@ pub struct HealthChecker {
 }
 
 impl HealthChecker {
-    pub fn new(interval_secs: u64) -> Self {
+    pub fn new(interval: Duration) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(5))
                 .build()
                 .unwrap(),
-            interval: Duration::from_secs(interval_secs),
+            interval,
         }
     }
 
@@ -33,6 +33,10 @@ impl HealthChecker {
         let backends = pool.all().await;
         for name in backends {
             if let Some(state) = pool.get(&name).await {
+                if !state.healthy && state.last_check.elapsed() < pool.recovery_time() {
+                    tracing::trace!("Backend {} is unhealthy, skipping until recovery time elapses", name);
+                    continue;
+                }
                 let url = format!("{}/", state.config.url);
                 match self.client.get(&url).send().await {
                     Ok(resp) if resp.status().is_success() => {

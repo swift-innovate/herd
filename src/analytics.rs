@@ -18,7 +18,7 @@ pub struct RequestLog {
 
 pub struct Analytics {
     log_path: PathBuf,
-    file: Arc<Mutex<std::fs::File>>,
+    file_lock: Arc<Mutex<()>>,
 }
 
 impl Analytics {
@@ -26,39 +26,46 @@ impl Analytics {
         let log_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
             .join(".herd");
-        
+
         std::fs::create_dir_all(&log_dir)?;
         let log_path = log_dir.join("requests.jsonl");
 
-        let file = OpenOptions::new()
+        // Touch the file to ensure it exists, then drop the handle
+        let _file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)?;
+        drop(_file);
 
         Ok(Self {
             log_path,
-            file: Arc::new(Mutex::new(file)),
+            file_lock: Arc::new(Mutex::new(())),
         })
     }
 
     pub async fn log_request(&self, log: RequestLog) -> Result<()> {
-        let mut file = self.file.lock().await;
+        let _guard = self.file_lock.lock().await;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)?;
         let json = serde_json::to_string(&log)?;
         writeln!(file, "{}", json)?;
         file.flush()?;
         Ok(())
     }
 
-    pub fn get_stats(&self, since_seconds: i64) -> Result<AnalyticsStats> {
+    pub async fn get_stats(&self, since_seconds: i64) -> Result<AnalyticsStats> {
+        let _guard = self.file_lock.lock().await;
         let cutoff = chrono::Utc::now().timestamp() - since_seconds;
-        
+
         let file = std::fs::File::open(&self.log_path)?;
         let reader = BufReader::new(file);
         
         let mut total_requests = 0;
         let mut model_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         let mut backend_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut timeline: Vec<(i64, u64)> = Vec::new(); // (timestamp_minute, count)
+        let _timeline: Vec<(i64, u64)> = Vec::new(); // (timestamp_minute, count)
         let mut minute_buckets: std::collections::HashMap<i64, u64> = std::collections::HashMap::new();
         let mut durations: Vec<u64> = Vec::new();
 
@@ -109,9 +116,10 @@ impl Analytics {
         })
     }
 
-    pub fn cleanup_old(&self, days: i64) -> Result<usize> {
+    pub async fn cleanup_old(&self, days: i64) -> Result<usize> {
+        let _guard = self.file_lock.lock().await;
         let cutoff = chrono::Utc::now().timestamp() - (days * 86400);
-        
+
         let file = std::fs::File::open(&self.log_path)?;
         let reader = BufReader::new(file);
         
@@ -122,7 +130,7 @@ impl Analytics {
             .truncate(true)
             .open(&temp_path)?;
         
-        let mut kept = 0;
+        let mut _kept = 0;
         let mut removed = 0;
 
         for line in reader.lines() {
@@ -130,7 +138,7 @@ impl Analytics {
             if let Ok(log) = serde_json::from_str::<RequestLog>(&line) {
                 if log.timestamp >= cutoff {
                     writeln!(temp_file, "{}", line)?;
-                    kept += 1;
+                    _kept += 1;
                 } else {
                     removed += 1;
                 }

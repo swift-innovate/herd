@@ -1,78 +1,62 @@
 # Herd Roadmap
 
-**Updated:** March 5, 2026
+**Updated:** March 6, 2026
 
 ## Vision
 
-Herd is evolving from an intelligent Ollama router into the **complete local AI orchestration platform**.
+Herd is the **fastest way to route AI workloads across local Ollama backends**.
 
-One fast, single Rust binary will give you:
+One fast, single Rust binary gives you:
 - GPU-aware routing across multiple Ollama nodes
-- Safe, production-grade multi-agent orchestration with strong permission guardrails
-- Unified observability and dashboard
+- Circuit breaker resilience with configurable failure thresholds
+- Unified observability: metrics, analytics, and a live dashboard
+- OpenAI-compatible API for drop-in compatibility
 
-No more running separate services. No API keys exposed. Full local control.
-
-## Why Merge Conduit into Herd?
-
-Instead of maintaining two separate projects, we're bringing the best ideas from Conduit (session management, permission engine, audit logging, and multi-agent patterns) directly into Herd.
-
-Benefits:
-- Single binary (`herd`) and single port
-- Deep integration between GPU routing and agent execution
-- Faster development and better consistency
-- Zero Anthropic ToS risk (we're building on local Ollama with tool-use guardrails)
-
-The Conduit repository will be archived with a clear redirect here.
+No cloud dependency. No API keys exposed. Full local control.
 
 ## Roadmap
 
-### Phase 1 — v0.3.0: Agent Gateway (Target: Late March 2026)
-**Core Multi-Agent Support**
+### v0.2.1 — Security Hardening (Current)
 
-- New `/agent/` REST + WebSocket API
-- Session management (create, list, resume, delete)
-- Permission engine with configurable deny rules (file I/O and bash execution guardrails)
-- Built-in audit logging (extends existing `requests.jsonl`)
-- Full integration with existing router, GPU scoring, and circuit breaker
-- Basic tool calling support for Ollama models
-- New "Sessions" tab in the dashboard
+- Configurable circuit breaker (failure threshold, recovery time)
+- API key authentication for admin endpoints
+- Proxy hardening (body size cap, header forwarding, query string preservation)
+- Analytics race condition fix
+- CLI backend specification parser
+- Conditional route registration (admin API off by default)
 
-**Backward compatible** — all existing `/api` and future `/v1` endpoints continue to work unchanged.
+### v0.3.0 — Routing & Reliability (Target: April 2026)
 
-### Phase 2 — v0.4.0: Enhanced Orchestration (April 2026)
-- Advanced permission profiles and project-based scoping
-- Real-time session monitoring and cost estimation
-- WebSocket streaming improvements
-- OpenAI `/v1/chat/completions` compatibility layer (full drop-in support)
-- Model-aware agent routing (send agentic workloads to best GPU node)
+- Retry loop with configurable attempt count
+- Request timeout enforcement per routing strategy
+- Weighted round-robin routing strategy
+- Backend tagging and tag-based routing
+- Health check endpoint customization (configurable path and expected status)
+- Hot-reload configuration without restart
 
-### Phase 3 — v0.5.0+: Multi-Model & Advanced Features (Q2 2026)
-- Commercial backend support (Anthropic, OpenAI, etc. via API keys)
-- MCP server compatibility
-- Session forking and templating
-- Distributed agent coordination across nodes
-- Plugin system for custom tools
+### v0.4.0 — Observability & Operations (Q2 2026)
 
-## Technical Approach
+- OpenAI `/v1/chat/completions` full compatibility layer
+- Prometheus-native metrics export
+- Request tracing with correlation IDs
+- Dashboard improvements (latency graphs, per-model analytics)
+- Log rotation and retention policies
 
-All new agent functionality will live in a clean `agent/` module that reuses Herd's existing architecture:
-- `RouterEngine` for intelligent backend selection
-- `CircuitBreaker` for resilience
-- Existing observability and hot-reload config
-- Minimal new dependencies
+### v0.5.0+ — Scale & Ecosystem (Q3 2026)
+
+- Multi-node discovery (mDNS / static fleet config)
+- TLS termination
+- Rate limiting per client / API key
+- Plugin system for custom routing strategies
+- Distributed health consensus
 
 ## Get Involved
 
-This is the biggest evolution of Herd yet.
-
 If you're interested in:
-- Testing early agent builds
-- Contributing to the permission engine
-- Sharing real-world agent use cases
+- Testing pre-release builds
+- Contributing routing strategies or backend integrations
+- Sharing real-world deployment patterns
 
-...please open an issue or discussion with the label `agent-gateway`.
-
-The goal is simple: Make Herd the best place to run both powerful local models **and** safe, controllable agents on your own hardware.
+...please open an issue or discussion.
 
 — swift-innovate
