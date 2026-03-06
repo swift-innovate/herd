@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 use std::fs;
 use anyhow::Result;
 
@@ -28,6 +29,9 @@ pub struct ServerConfig {
     
     #[serde(default = "default_port")]
     pub port: u16,
+
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -35,6 +39,7 @@ impl Default for ServerConfig {
         Self {
             host: default_host(),
             port: default_port(),
+            api_key: None,
         }
     }
 }
@@ -148,7 +153,7 @@ pub struct ObservabilityConfig {
     #[serde(default = "default_true")]
     pub metrics: bool,
     
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub admin_api: bool,
     
     #[serde(default)]
@@ -159,7 +164,7 @@ impl Default for ObservabilityConfig {
     fn default() -> Self {
         Self {
             metrics: true,
-            admin_api: true,
+            admin_api: false,
             tracing: false,
         }
     }
@@ -188,5 +193,45 @@ impl Default for Config {
             circuit_breaker: CircuitBreakerConfig::default(),
             observability: ObservabilityConfig::default(),
         }
+    }
+}
+
+pub fn parse_duration(input: &str) -> Result<Duration> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("duration is empty");
+    }
+    let split_at = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(trimmed.len());
+    let (number, suffix) = trimmed.split_at(split_at);
+    if number.is_empty() {
+        anyhow::bail!("duration has no numeric component: {}", input);
+    }
+    let value = number.parse::<u64>()?;
+    let duration = match suffix {
+        "" | "s" => Duration::from_secs(value),
+        "ms" => Duration::from_millis(value),
+        "m" => Duration::from_secs(value.saturating_mul(60)),
+        "h" => Duration::from_secs(value.saturating_mul(3600)),
+        _ => anyhow::bail!("unsupported duration suffix '{}': {}", suffix, input),
+    };
+    Ok(duration)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_duration;
+    use std::time::Duration;
+
+    #[test]
+    fn parse_duration_seconds() {
+        assert_eq!(parse_duration("120s").unwrap(), Duration::from_secs(120));
+    }
+    #[test]
+    fn parse_duration_minutes() {
+        assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+    }
+    #[test]
+    fn parse_duration_millis() {
+        assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
     }
 }

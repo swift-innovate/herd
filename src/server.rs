@@ -1,14 +1,20 @@
 use crate::analytics::{Analytics, RequestLog};
 use crate::api::{admin, openai};
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
-use crate::config::Config;
+use crate::config::{parse_duration, Config};
 use crate::router::{create_router, Router};
 use crate::model_homing::ModelHoming;
 use anyhow::Result;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use chrono::Timelike;
+
+const DEFAULT_ROUTING_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_CIRCUIT_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_RECOVERY_TIME: Duration = Duration::from_secs(60);
+const MAX_PROXY_BODY_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 
 pub struct Server {
     config: Config,
@@ -21,6 +27,8 @@ pub struct AppState {
     pub client: Arc<reqwest::Client>,
     pub config: Config,
     pub analytics: Arc<Analytics>,
+    pub routing_timeout: Duration,
+    pub routing_retry_count: u32,
 }
 
 impl Server {
@@ -32,11 +40,28 @@ impl Server {
         let addr = format!("{}:{}", self.config.server.host, self.config.server.port);
         info!("Starting Herd on {} with {} backends", addr, self.config.backends.len());
 
-        // Create backend pool
-        let pool = BackendPool::new(self.config.backends.clone());
+        // Parse durations from config
+        let routing_timeout = parse_duration(&self.config.routing.timeout)
+            .unwrap_or(DEFAULT_ROUTING_TIMEOUT);
+        let circuit_timeout = parse_duration(&self.config.circuit_breaker.timeout)
+            .unwrap_or(DEFAULT_CIRCUIT_TIMEOUT);
+        let recovery_time = parse_duration(&self.config.circuit_breaker.recovery_time)
+            .unwrap_or(DEFAULT_RECOVERY_TIME);
+
+        // Validate: admin_api requires api_key
+        if self.config.observability.admin_api && self.config.server.api_key.is_none() {
+            anyhow::bail!("observability.admin_api is enabled but server.api_key is not set");
+        }
+
+        // Create backend pool with circuit breaker config
+        let pool = BackendPool::new(
+            self.config.backends.clone(),
+            self.config.circuit_breaker.failure_threshold,
+            recovery_time,
+        );
 
         // Start health checker
-        let health_checker = HealthChecker::new(10);
+        let health_checker = HealthChecker::new(Duration::from_secs(10));
         let pool_clone = pool.clone();
         tokio::spawn(async move {
             health_checker.spawn(pool_clone).await;
@@ -58,17 +83,17 @@ impl Server {
 
         // Initialize analytics
         let analytics = Arc::new(Analytics::new()?);
-        
+
         // Start 7-day cleanup task (runs daily at 3 AM)
         let analytics_clone = Arc::clone(&analytics);
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await; // Every hour
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
                 let now = chrono::Local::now();
                 let hour = now.hour();
                 let minute = now.minute();
                 if hour == 3 && minute < 5 {
-                    if let Err(e) = analytics_clone.cleanup_old(7) {
+                    if let Err(e) = analytics_clone.cleanup_old(7).await {
                         tracing::error!("Failed to cleanup old analytics: {}", e);
                     } else {
                         tracing::info!("Cleaned up analytics logs older than 7 days");
@@ -82,7 +107,9 @@ impl Server {
 
         // Wrap in Arc
         let pool = Arc::new(pool);
-        let client = Arc::new(reqwest::Client::new());
+        let client = Arc::new(reqwest::Client::builder()
+            .timeout(circuit_timeout)
+            .build()?);
 
         let state = AppState {
             pool: Arc::clone(&pool),
@@ -90,32 +117,49 @@ impl Server {
             client: Arc::clone(&client),
             config: self.config.clone(),
             analytics,
+            routing_timeout,
+            routing_retry_count: self.config.routing.retry_count,
         };
 
-        // Build admin sub-router
-        let admin_routes = axum::Router::new()
-            .route("/", axum::routing::get(admin::list_backends).post(admin::add_backend))
-            .route("/:name", axum::routing::get(admin::get_backend)
-                .put(admin::update_backend)
-                .delete(admin::remove_backend));
-
         // Build app with routes
-        let app = axum::Router::new()
-            // Health check
+        let mut app = axum::Router::new()
+            // Health check (always available, no auth)
             .route("/health", axum::routing::get(|| async { "OK" }))
-            // Status and metrics
+            // Status
             .route("/status", axum::routing::get(status_handler))
-            .route("/metrics", axum::routing::get(metrics_handler))
-            .route("/analytics", axum::routing::get(analytics_handler))
-            .route("/update", axum::routing::get(update_check_handler))
-            .route("/gpu", axum::routing::get(gpu_handler))
             // Dashboard
             .route("/dashboard", axum::routing::get(dashboard_handler))
             // OpenAI-compatible API
             .route("/v1/models", axum::routing::get(openai::list_models))
-            // Admin API
-            .nest("/admin/backends", admin_routes)
-            // Proxy (catch-all)
+            // Update check
+            .route("/update", axum::routing::get(update_check_handler))
+            // GPU handler
+            .route("/gpu", axum::routing::get(gpu_handler));
+
+        // Conditionally mount metrics
+        if self.config.observability.metrics {
+            app = app
+                .route("/metrics", axum::routing::get(metrics_handler))
+                .route("/analytics", axum::routing::get(analytics_handler));
+        }
+
+        // Conditionally mount admin API (requires auth)
+        if self.config.observability.admin_api {
+            let admin_routes = axum::Router::new()
+                .route("/", axum::routing::get(admin::list_backends).post(admin::add_backend))
+                .route("/:name", axum::routing::get(admin::get_backend)
+                    .put(admin::update_backend)
+                    .delete(admin::remove_backend))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    require_api_key,
+                ));
+
+            app = app.nest("/admin/backends", admin_routes);
+        }
+
+        // Proxy (catch-all) + tracing layer
+        let app = app
             .fallback(proxy_handler)
             .layer(tower::ServiceBuilder::new().layer(TraceLayer::new_for_http()))
             .with_state(state);
@@ -128,43 +172,112 @@ impl Server {
     }
 }
 
+// ---------------------------------------------------------------------------
+// API key authentication middleware
+// ---------------------------------------------------------------------------
+
+fn extract_api_key(req: &axum::extract::Request) -> Option<String> {
+    // Try X-API-Key header first
+    if let Some(val) = req.headers().get("x-api-key") {
+        return val.to_str().ok().map(|s| s.to_string());
+    }
+    // Try Authorization: Bearer <key>
+    if let Some(val) = req.headers().get("authorization") {
+        if let Ok(s) = val.to_str() {
+            if let Some(token) = s.strip_prefix("Bearer ") {
+                return Some(token.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+pub async fn require_api_key(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let expected = match &state.config.server.api_key {
+        Some(key) => key,
+        None => return Ok(next.run(req).await), // no key configured = allow
+    };
+
+    let provided = extract_api_key(&req)
+        .ok_or(axum::http::StatusCode::UNAUTHORIZED)?;
+
+    if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        return Err(axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(next.run(req).await)
+}
+
+// ---------------------------------------------------------------------------
+// Proxy handler
+// ---------------------------------------------------------------------------
+
+fn copy_request_headers(
+    src: &axum::http::HeaderMap,
+    builder: reqwest::RequestBuilder,
+) -> reqwest::RequestBuilder {
+    let mut builder = builder;
+    for (name, value) in src.iter() {
+        // Skip host and connection-level headers
+        if name == axum::http::header::HOST
+            || name == axum::http::header::CONNECTION
+            || name == axum::http::header::TRANSFER_ENCODING
+        {
+            continue;
+        }
+        if let (Ok(rname), Ok(rval)) = (
+            reqwest::header::HeaderName::from_bytes(name.as_ref()),
+            reqwest::header::HeaderValue::from_bytes(value.as_ref()),
+        ) {
+            builder = builder.header(rname, rval);
+        }
+    }
+    builder
+}
+
 async fn proxy_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, axum::http::StatusCode> {
     let start = std::time::Instant::now();
-    
-    // Extract model from request if it's a generation request
+
+    // Preserve full path + query string
+    let path_and_query = request
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
     let path = request.uri().path().to_string();
     let mut model_name: Option<String> = None;
-    
-    // Route request
-    let backend = state
-        .router
-        .route(model_name.as_deref())
-        .await
-        .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-    // Touch the backend to update last_request time
-    state.pool.touch_request(&backend.name).await;
+    // Bridge HTTP method (axum http 1.x → reqwest http 0.2)
+    let method = reqwest::Method::from_bytes(request.method().as_str().as_bytes())
+        .unwrap_or(reqwest::Method::POST);
 
-    let url = format!("{}{}", backend.url, path);
-    
-    // Get method from original request
-    let method = match *request.method() {
-        axum::http::Method::GET => reqwest::Method::GET,
-        axum::http::Method::POST => reqwest::Method::POST,
-        axum::http::Method::PUT => reqwest::Method::PUT,
-        axum::http::Method::DELETE => reqwest::Method::DELETE,
-        _ => reqwest::Method::POST,
-    };
-    
-    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+    // Collect request headers before consuming body
+    let headers = request.headers().clone();
+
+    // Cap body size to prevent DoS
+    let body_bytes = axum::body::to_bytes(request.into_body(), MAX_PROXY_BODY_BYTES)
         .await
-        .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+        .map_err(|_| axum::http::StatusCode::PAYLOAD_TOO_LARGE)?;
 
     // Try to extract model from body for routing and logging.
-    // Covers both Ollama-native (/api/generate, /api/chat) and OpenAI-compat paths.
     if path.contains("/api/generate") || path.contains("/api/chat")
         || path.contains("/v1/chat/completions") || path.contains("/v1/completions")
     {
@@ -175,16 +288,26 @@ async fn proxy_handler(
         }
     }
 
-    let response = state
-        .client
-        .request(method, &url)
-        .body(body_bytes)
-        .send()
-        .await;
+    // Route request (using extracted model)
+    let backend = state
+        .router
+        .route(model_name.as_deref())
+        .await
+        .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
+    // Touch the backend to update last_request time
+    state.pool.touch_request(&backend.name).await;
+
+    let url = format!("{}{}", backend.url, path_and_query);
+
+    // Build and send request with header forwarding
+    let req_builder = state.client.request(method, &url);
+    let req_builder = copy_request_headers(&headers, req_builder);
+    let response = req_builder.body(body_bytes).send().await;
 
     let duration = start.elapsed();
     let status = if response.is_ok() { "success" } else { "error" };
-    
+
     // Log request
     let log = RequestLog {
         timestamp: chrono::Utc::now().timestamp(),
@@ -194,7 +317,7 @@ async fn proxy_handler(
         status: status.to_string(),
         path: path.clone(),
     };
-    
+
     if let Err(e) = state.analytics.log_request(log).await {
         tracing::error!("Failed to log request: {}", e);
     }
@@ -206,20 +329,27 @@ async fn proxy_handler(
 
             let mut builder = axum::response::Response::builder().status(status_code);
 
-            // Forward response headers so streaming (SSE) clients receive
-            // Content-Type: text/event-stream and can parse chunks correctly.
+            // Forward response headers (bridge reqwest http 0.2 → axum http 1.x)
             for (name, value) in r.headers() {
-                builder = builder.header(name, value);
+                if let (Ok(aname), Ok(aval)) = (
+                    axum::http::header::HeaderName::from_bytes(name.as_ref()),
+                    axum::http::header::HeaderValue::from_bytes(value.as_ref()),
+                ) {
+                    builder = builder.header(aname, aval);
+                }
             }
 
-            // Stream the body instead of buffering — required for streaming
-            // completions (/v1/chat/completions with stream:true, /api/generate, etc.)
+            // Stream the body instead of buffering
             let body = axum::body::Body::from_stream(r.bytes_stream());
             Ok(builder.body(body).unwrap())
         },
         Err(_) => Err(axum::http::StatusCode::BAD_GATEWAY)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Status / metrics / analytics / other handlers
+// ---------------------------------------------------------------------------
 
 async fn status_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -273,7 +403,7 @@ async fn metrics_handler(
 ) -> String {
     let healthy = state.pool.all_healthy().await.len();
     let total = state.pool.all().await.len();
-    
+
     let mut metrics = format!(
         r#"# HELP herd_backends_total Total number of configured backends
 # TYPE herd_backends_total gauge
@@ -298,7 +428,7 @@ herd_backends_healthy {}
                 backend.healthy
             );
             metrics.push_str(&format!("herd_backend_info{{{}}} 1\n", labels));
-            
+
             if let Some(gpu) = &backend.gpu_metrics {
                 metrics.push_str(&format!(
                     r#"herd_backend_gpu_utilization{{name="{}"}} {}
@@ -325,10 +455,10 @@ async fn analytics_handler(
     let hours = params.get("hours")
         .and_then(|h| h.parse::<i64>().ok())
         .unwrap_or(24);
-    
+
     let seconds = hours * 3600;
-    
-    match state.analytics.get_stats(seconds) {
+
+    match state.analytics.get_stats(seconds).await {
         Ok(stats) => axum::Json(serde_json::to_value(&stats).unwrap()),
         Err(e) => axum::Json(serde_json::json!({
             "error": format!("Failed to get analytics: {}", e)
@@ -339,10 +469,10 @@ async fn analytics_handler(
 async fn update_check_handler() -> axum::Json<serde_json::Value> {
     const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
     const REPO: &str = "swift-innovate/herd";
-    
+
     let client = reqwest::Client::new();
     let url = format!("https://api.github.com/repos/{}/releases/latest", REPO);
-    
+
     match client.get(&url)
         .header("User-Agent", "Herd")
         .send()
@@ -376,13 +506,11 @@ async fn update_check_handler() -> axum::Json<serde_json::Value> {
 async fn gpu_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> axum::Json<serde_json::Value> {
-    // Query all healthy backends for GPU data via gpu-hot (port 1312)
     let backends = state.pool.all_healthy().await;
     let mut gpu_data = std::collections::HashMap::new();
-    
+
     for name in backends {
         if let Some(backend) = state.pool.get(&name).await {
-            // Use configured gpu_hot_url, or derive from backend host on port 1312
             let gpu_url = if let Some(ref base) = backend.config.gpu_hot_url {
                 let base = base.trim_end_matches('/');
                 format!("{}/api/gpu-data", base)
@@ -398,7 +526,7 @@ async fn gpu_handler(
                 }
                 format!("http://{}:1312/api/gpu-data", host)
             };
-            
+
             match state
                 .client
                 .get(&gpu_url)
@@ -412,13 +540,12 @@ async fn gpu_handler(
                     }
                 }
                 _ => {
-                    // Backend doesn't have gpu-hot or it's not responding
                     tracing::trace!("No gpu-hot data from {}", name);
                 }
             }
         }
     }
-    
+
     if gpu_data.is_empty() {
         axum::Json(serde_json::json!({
             "available": false,

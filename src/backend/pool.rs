@@ -1,5 +1,6 @@
 use crate::config::Backend;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use std::time::Instant;
 
@@ -26,10 +27,12 @@ pub struct GpuMetrics {
 #[derive(Clone)]
 pub struct BackendPool {
     pub backends: Arc<RwLock<Vec<BackendState>>>,
+    failure_threshold: u32,
+    recovery_time: Duration,
 }
 
 impl BackendPool {
-    pub fn new(backends: Vec<Backend>) -> Self {
+    pub fn new(backends: Vec<Backend>, failure_threshold: u32, recovery_time: Duration) -> Self {
         let now = Instant::now();
         let states = backends
             .into_iter()
@@ -47,6 +50,8 @@ impl BackendPool {
 
         Self {
             backends: Arc::new(RwLock::new(states)),
+            failure_threshold: failure_threshold.max(1),
+            recovery_time,
         }
     }
 
@@ -124,11 +129,15 @@ impl BackendPool {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
             backend.failure_count += 1;
-            if backend.failure_count >= 3 {
+            if backend.failure_count >= self.failure_threshold {
                 backend.healthy = false;
             }
             backend.last_check = Instant::now();
         }
+    }
+
+    pub fn recovery_time(&self) -> Duration {
+        self.recovery_time
     }
 
     pub async fn update_models(&self, name: &str, models: Vec<String>) {
