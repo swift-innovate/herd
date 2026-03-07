@@ -43,21 +43,10 @@ async fn main() -> anyhow::Result<()> {
         config.server.host = cli.host;
         config.server.port = cli.port;
 
-        for backend in cli.backend {
-            let parts: Vec<&str> = backend.split('=').collect();
-            if parts.len() == 2 {
-                let name = parts[0].to_string();
-                let url_parts: Vec<&str> = parts[1].split(':').collect();
-                if url_parts.len() >= 3 {
-                    let url = format!("http://{}:{}", url_parts[0], url_parts[1]);
-                    let priority: u32 = url_parts[2].parse().unwrap_or(50);
-                    config.backends.push(herd::config::Backend {
-                        name,
-                        url,
-                        priority,
-                        ..Default::default()
-                    });
-                }
+        for spec in cli.backend {
+            match herd::cli::parse_backend_spec(&spec) {
+                Some(backend) => config.backends.push(backend),
+                None => tracing::warn!("Ignoring invalid backend spec: {}", spec),
             }
         }
 
