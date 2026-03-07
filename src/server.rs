@@ -149,17 +149,77 @@ impl Server {
             app = app.nest("/admin/backends", admin_routes);
         }
 
-        // Proxy (catch-all) + tracing layer
-        let app = app
-            .fallback(proxy_handler)
-            .layer(tower::ServiceBuilder::new().layer(TraceLayer::new_for_http()))
-            .with_state(state);
+        // Proxy (catch-all) + middleware layers
+        let app = if self.config.server.rate_limit > 0 {
+            let limiter = Arc::new(RateLimiter::new(self.config.server.rate_limit));
+            app.fallback(proxy_handler)
+                .layer(tower::ServiceBuilder::new()
+                    .layer(TraceLayer::new_for_http()))
+                .layer(axum::middleware::from_fn(move |req, next: axum::middleware::Next| {
+                    let limiter = Arc::clone(&limiter);
+                    async move {
+                        if limiter.try_acquire() {
+                            Ok(next.run(req).await)
+                        } else {
+                            Err(axum::http::StatusCode::TOO_MANY_REQUESTS)
+                        }
+                    }
+                }))
+                .with_state(state)
+        } else {
+            app.fallback(proxy_handler)
+                .layer(tower::ServiceBuilder::new()
+                    .layer(TraceLayer::new_for_http()))
+                .with_state(state)
+        };
 
         // Start server
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         axum::serve(listener, app).await?;
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Token-bucket rate limiter
+// ---------------------------------------------------------------------------
+
+struct RateLimiter {
+    tokens: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl RateLimiter {
+    fn new(requests_per_second: u64) -> Self {
+        let tokens = Arc::new(std::sync::atomic::AtomicU64::new(requests_per_second));
+        // Spawn refill task
+        let tokens_clone = Arc::clone(&tokens);
+        let max = requests_per_second;
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                ticker.tick().await;
+                tokens_clone.store(max, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        Self { tokens }
+    }
+
+    fn try_acquire(&self) -> bool {
+        loop {
+            let current = self.tokens.load(std::sync::atomic::Ordering::Relaxed);
+            if current == 0 {
+                return false;
+            }
+            if self.tokens.compare_exchange_weak(
+                current,
+                current - 1,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            ).is_ok() {
+                return true;
+            }
+        }
     }
 }
 

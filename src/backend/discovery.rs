@@ -116,7 +116,27 @@ impl ModelDiscovery {
         let resp = self.client.get(&url).send().await?;
         let models: OllamaModels = resp.json().await?;
 
-        let model_names: Vec<String> = models.models.into_iter().map(|m| m.name).collect();
+        let mut model_names: Vec<String> = models.models.into_iter().map(|m| m.name).collect();
+
+        // Apply model_filter regex if configured
+        if let Some(ref filter) = backend.model_filter {
+            match regex::Regex::new(filter) {
+                Ok(re) => {
+                    let before = model_names.len();
+                    model_names.retain(|name| re.is_match(name));
+                    if model_names.len() < before {
+                        tracing::debug!(
+                            "model_filter '{}' on {}: kept {}/{} models",
+                            filter, backend.name, model_names.len(), before
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Invalid model_filter '{}' on {}: {}", filter, backend.name, e);
+                }
+            }
+        }
+
         pool.update_models(&backend.name, model_names).await;
 
         Ok(())
