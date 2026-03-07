@@ -62,24 +62,15 @@ impl Server {
 
         // Start health checker
         let health_checker = HealthChecker::new(Duration::from_secs(10));
-        let pool_clone = pool.clone();
-        tokio::spawn(async move {
-            health_checker.spawn(pool_clone).await;
-        });
+        health_checker.spawn(pool.clone()).await;
 
         // Start model discovery (every 60 seconds)
         let discovery = ModelDiscovery::new(60);
-        let pool_clone = pool.clone();
-        tokio::spawn(async move {
-            discovery.spawn(pool_clone).await;
-        });
+        discovery.spawn(pool.clone()).await;
 
         // Start model homing (every 5 minutes)
         let homing = ModelHoming::new(self.config.routing.idle_timeout_minutes);
-        let pool_clone = pool.clone();
-        tokio::spawn(async move {
-            homing.spawn(pool_clone).await;
-        });
+        homing.spawn(pool.clone()).await;
 
         // Initialize analytics
         let analytics = Arc::new(Analytics::new()?);
@@ -479,12 +470,15 @@ async fn analytics_handler(
 ) -> axum::Json<serde_json::Value> {
     let hours = params.get("hours")
         .and_then(|h| h.parse::<i64>().ok())
-        .unwrap_or(24);
+        .unwrap_or(24)
+        .clamp(1, 168); // Cap at 7 days
 
     let seconds = hours * 3600;
 
     match state.analytics.get_stats(seconds).await {
-        Ok(stats) => axum::Json(serde_json::to_value(&stats).unwrap()),
+        Ok(stats) => axum::Json(
+            serde_json::to_value(&stats).unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"}))
+        ),
         Err(e) => axum::Json(serde_json::json!({
             "error": format!("Failed to get analytics: {}", e)
         }))
