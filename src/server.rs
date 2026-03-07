@@ -288,31 +288,54 @@ async fn proxy_handler(
         }
     }
 
-    // Route request (using extracted model)
-    let backend = state
-        .router
-        .route(model_name.as_deref())
-        .await
-        .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    // Retry loop: try routing to different backends on failure
+    let mut response = None;
+    let mut selected_backend: Option<String> = None;
 
-    // Touch the backend to update last_request time
-    state.pool.touch_request(&backend.name).await;
+    for _ in 0..=state.routing_retry_count {
+        let backend = state
+            .router
+            .route(model_name.as_deref())
+            .await
+            .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-    let url = format!("{}{}", backend.url, path_and_query);
+        state.pool.touch_request(&backend.name).await;
+        selected_backend = Some(backend.name.clone());
+        let url = format!("{}{}", backend.url, path_and_query);
 
-    // Build and send request with header forwarding
-    let req_builder = state.client.request(method, &url);
-    let req_builder = copy_request_headers(&headers, req_builder);
-    let response = req_builder.body(body_bytes).send().await;
+        let req_builder = state
+            .client
+            .request(method.clone(), &url)
+            .timeout(state.routing_timeout)
+            .body(body_bytes.clone());
+        let req_builder = copy_request_headers(&headers, req_builder);
+
+        match req_builder.send().await {
+            Ok(r) => {
+                state.pool.mark_healthy(&backend.name).await;
+                response = Some(r);
+                break;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Upstream request to {} failed via {}: {}",
+                    url,
+                    backend.name,
+                    e
+                );
+                state.pool.mark_unhealthy(&backend.name).await;
+            }
+        }
+    }
 
     let duration = start.elapsed();
-    let status = if response.is_ok() { "success" } else { "error" };
+    let status = if response.is_some() { "success" } else { "error" };
 
     // Log request
     let log = RequestLog {
         timestamp: chrono::Utc::now().timestamp(),
         model: model_name,
-        backend: backend.name.clone(),
+        backend: selected_backend.unwrap_or_else(|| "none".to_string()),
         duration_ms: duration.as_millis() as u64,
         status: status.to_string(),
         path: path.clone(),
@@ -323,7 +346,7 @@ async fn proxy_handler(
     }
 
     match response {
-        Ok(r) => {
+        Some(r) => {
             let status_code = axum::http::StatusCode::from_u16(r.status().as_u16())
                 .unwrap_or(axum::http::StatusCode::OK);
 
@@ -341,9 +364,11 @@ async fn proxy_handler(
 
             // Stream the body instead of buffering
             let body = axum::body::Body::from_stream(r.bytes_stream());
-            Ok(builder.body(body).unwrap())
-        },
-        Err(_) => Err(axum::http::StatusCode::BAD_GATEWAY)
+            builder
+                .body(body)
+                .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)
+        }
+        None => Err(axum::http::StatusCode::BAD_GATEWAY),
     }
 }
 
