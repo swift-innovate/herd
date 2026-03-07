@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait Router: Send + Sync {
-    async fn route(&self, model: Option<&str>) -> Result<RoutedBackend>;
+    async fn route(&self, model: Option<&str>, tags: Option<&[String]>) -> Result<RoutedBackend>;
 }
 
 #[derive(Clone, Debug)]
@@ -29,12 +29,12 @@ pub enum RouterEnum {
 
 #[async_trait]
 impl Router for RouterEnum {
-    async fn route(&self, model: Option<&str>) -> Result<RoutedBackend> {
+    async fn route(&self, model: Option<&str>, tags: Option<&[String]>) -> Result<RoutedBackend> {
         match self {
-            RouterEnum::Priority(r) => r.route(model).await,
-            RouterEnum::ModelAware(r) => r.route(model).await,
-            RouterEnum::LeastBusy(r) => r.route(model).await,
-            RouterEnum::WeightedRoundRobin(r) => r.route(model).await,
+            RouterEnum::Priority(r) => r.route(model, tags).await,
+            RouterEnum::ModelAware(r) => r.route(model, tags).await,
+            RouterEnum::LeastBusy(r) => r.route(model, tags).await,
+            RouterEnum::WeightedRoundRobin(r) => r.route(model, tags).await,
         }
     }
 }

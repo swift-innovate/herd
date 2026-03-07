@@ -15,13 +15,13 @@ impl LeastBusyRouter {
 
 #[async_trait]
 impl Router for LeastBusyRouter {
-    async fn route(&self, _model: Option<&str>) -> anyhow::Result<RoutedBackend> {
-        // Route to least busy backend (by GPU utilization)
-        let backend = self
-            .pool
-            .get_least_busy()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
+    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
+        let backend = if let Some(tags) = tags {
+            self.pool.get_least_busy_tagged(tags).await
+        } else {
+            self.pool.get_least_busy().await
+        }
+        .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 
         tracing::debug!(
             "Routing to {} (least busy)",
@@ -81,7 +81,7 @@ mod tests {
         .await;
 
         let router = LeastBusyRouter::new(pool);
-        let result = router.route(None).await.unwrap();
+        let result = router.route(None, None).await.unwrap();
         assert_eq!(result.name, "idle");
     }
 
@@ -95,7 +95,7 @@ mod tests {
 
         // No GPU metrics set on either backend — should still return a backend
         let router = LeastBusyRouter::new(pool);
-        let result = router.route(None).await;
+        let result = router.route(None, None).await;
         assert!(result.is_ok());
     }
 }

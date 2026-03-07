@@ -1,39 +1,36 @@
-# Pending Work — Herd + Herd-Pro
+# v0.3.0 — Complete
 
-## Step 1: Herd — `/v1/chat/completions` endpoint
-- [x] Read herd-pro's working implementation for reference
-- [x] Implement POST /v1/chat/completions in src/api/openai.rs
-- [x] Wire route in src/server.rs
-- [x] Validate build (clean compile)
-- [x] All 6 existing tests pass
-
-## Step 2: Herd — Test coverage expansion (6 → 23 tests)
-- [x] Router strategy tests (priority, model_aware, least_busy) — 8 tests
-- [x] Backend pool tests (add/remove, health tracking, circuit breaker) — 5 tests
-- [x] Weighted round-robin tests — 4 tests
-- [x] All 23 tests pass
-
-## Step 3: Herd — Weighted round-robin router (v0.3.0)
-- [x] Implement weighted round-robin strategy (src/router/weighted_round_robin.rs)
-- [x] Add to RouterEnum and RoutingStrategy
-- [x] Add config support (`weighted_round_robin`)
-- [x] Tests (4 tests: distribution, single backend, unhealthy skip, no healthy error)
+## Step 1: Backend tagging + tag-based routing
+- [x] Add `BackendPool::get_healthy_with_tags()` and tagged variants
+- [x] Extend `Router` trait to accept `tags: Option<&[String]>`
+- [x] Update all 4 router strategies
+- [x] Extract `X-Herd-Tags` header in proxy handler and chat_completions
+- [x] Tests (get_healthy_with_tags_filters, routes_with_tag_filter)
 - [x] Validate build
 
-## Step 4: Herd-Pro — Dashboard sessions tab polish
-- [x] Add authFetch helper for API key auth in dashboard
-- [x] Add API key input to header (persisted in localStorage)
-- [x] Fix session count label (active vs total)
-- [x] Replace 9 fetch calls with authFetch for admin/agent endpoints
-- [x] Validate build + all 61 tests pass
+## Step 2: Health check endpoint customization
+- [x] Add `health_check_path` and `health_check_status` to Backend config
+- [x] Modify HealthChecker to use per-backend configurable path/status
+- [x] Tests (default_health_check_path, custom_health_check_config_deserializes)
+- [x] Validate build
 
-## Step 5: Validation & commit
-- [x] Herd: 23/23 tests pass, clean build
-- [x] Herd-Pro: 61/61 tests pass, clean build
-- [ ] Commit changes
+## Step 3: Hot-reload configuration
+- [x] Refactor AppState: router in RwLock, timeout/retry in atomics
+- [x] Add `AppState::reload_config()` — syncs backends, swaps router, updates settings
+- [x] Add `POST /admin/reload` endpoint (auth required)
+- [x] Add file-polling reload (30s mtime check)
+- [x] Pass config_path from main.rs through to server
+- [x] Validate build
+
+## Step 4: Validation & version bump
+- [x] All 27 tests pass
+- [x] ROADMAP.md updated — v0.3.0 fully complete
+- [x] Version bumped to 0.3.0
+- [x] Ready to commit
 
 ## Review
-- Herd test coverage: 6 → 23 tests (3.8x increase)
-- Herd features added: /v1/chat/completions, weighted_round_robin router
-- Herd-Pro fix: dashboard auth for session/admin API calls
-- Both repos compile and pass all tests
+- v0.3.0 is fully complete with all 10 roadmap items done
+- Test coverage: 27 tests (up from 6 at session start)
+- Key features: tag routing (X-Herd-Tags), health check config, hot-reload (file + API)
+- Hot-reload reloads: backends, routing strategy, timeout, retry count
+- Non-reloadable (by design): server host/port, circuit breaker thresholds, rate limit

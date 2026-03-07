@@ -37,15 +37,18 @@ impl HealthChecker {
                     tracing::trace!("Backend {} is unhealthy, skipping until recovery time elapses", name);
                     continue;
                 }
-                let url = format!("{}/", state.config.url);
+                let path = state.config.health_check_path.as_deref().unwrap_or("/");
+                let url = format!("{}{}", state.config.url.trim_end_matches('/'), path);
                 match self.client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        pool.mark_healthy(&name).await;
-                        tracing::trace!("Backend {} is healthy", name);
-                    }
                     Ok(resp) => {
-                        warn!("Backend {} returned status {}", name, resp.status());
-                        pool.mark_unhealthy(&name).await;
+                        let expected = state.config.health_check_status.unwrap_or(200);
+                        if resp.status().as_u16() == expected || (expected == 200 && resp.status().is_success()) {
+                            pool.mark_healthy(&name).await;
+                            tracing::trace!("Backend {} is healthy", name);
+                        } else {
+                            warn!("Backend {} returned status {} (expected {})", name, resp.status(), expected);
+                            pool.mark_unhealthy(&name).await;
+                        }
                     }
                     Err(e) => {
                         warn!("Backend {} health check failed: {}", name, e);
@@ -54,5 +57,31 @@ impl HealthChecker {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Backend;
+
+    #[test]
+    fn default_health_check_path() {
+        let b = Backend::default();
+        assert!(b.health_check_path.is_none());
+        assert!(b.health_check_status.is_none());
+    }
+
+    #[test]
+    fn custom_health_check_config_deserializes() {
+        let yaml = r#"
+            name: test
+            url: http://localhost:11434
+            priority: 50
+            health_check_path: /health
+            health_check_status: 204
+        "#;
+        let b: Backend = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(b.health_check_path.as_deref(), Some("/health"));
+        assert_eq!(b.health_check_status, Some(204));
     }
 }

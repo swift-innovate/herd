@@ -15,10 +15,15 @@ impl ModelAwareRouter {
 
 #[async_trait]
 impl Router for ModelAwareRouter {
-    async fn route(&self, model: Option<&str>) -> anyhow::Result<RoutedBackend> {
+    async fn route(&self, model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
         // If model specified, try to find backend with model loaded
         if let Some(model_name) = model {
-            if let Some(backend) = self.pool.get_by_model(model_name).await {
+            let backend = if let Some(tags) = tags {
+                self.pool.get_by_model_tagged(model_name, tags).await
+            } else {
+                self.pool.get_by_model(model_name).await
+            };
+            if let Some(backend) = backend {
                 tracing::debug!(
                     "Routing {} to {} (model loaded)",
                     model_name,
@@ -32,11 +37,12 @@ impl Router for ModelAwareRouter {
         }
 
         // Fall back to highest priority healthy backend
-        let backend = self
-            .pool
-            .get_by_priority()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
+        let backend = if let Some(tags) = tags {
+            self.pool.get_by_priority_tagged(tags).await
+        } else {
+            self.pool.get_by_priority().await
+        }
+        .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 
         tracing::debug!(
             "Routing to {} (no model preference)",
@@ -77,7 +83,7 @@ mod tests {
         pool.update_models("gpu2", vec!["llama3".into()]).await;
 
         let router = ModelAwareRouter::new(pool);
-        let result = router.route(Some("llama3")).await.unwrap();
+        let result = router.route(Some("llama3"), None).await.unwrap();
         assert_eq!(result.name, "gpu2");
     }
 
@@ -91,7 +97,7 @@ mod tests {
 
         // No backend has the requested model
         let router = ModelAwareRouter::new(pool);
-        let result = router.route(Some("llama3")).await.unwrap();
+        let result = router.route(Some("llama3"), None).await.unwrap();
         // Falls back to highest priority
         assert_eq!(result.name, "gpu1");
     }
@@ -109,7 +115,7 @@ mod tests {
         pool.update_models("gpu2", vec!["llama3".into()]).await;
 
         let router = ModelAwareRouter::new(pool);
-        let result = router.route(Some("llama3")).await.unwrap();
+        let result = router.route(Some("llama3"), None).await.unwrap();
         // Should pick gpu1 since it has higher priority among model-bearing backends
         assert_eq!(result.name, "gpu1");
     }

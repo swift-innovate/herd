@@ -5,7 +5,9 @@ use crate::config::{parse_duration, Config};
 use crate::router::{create_router, Router};
 use crate::model_homing::ModelHoming;
 use anyhow::Result;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -18,22 +20,87 @@ const MAX_PROXY_BODY_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 
 pub struct Server {
     config: Config,
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Arc<BackendPool>,
-    pub router: crate::router::RouterEnum,
+    pub router: Arc<tokio::sync::RwLock<crate::router::RouterEnum>>,
     pub client: Arc<reqwest::Client>,
     pub config: Config,
     pub analytics: Arc<Analytics>,
-    pub routing_timeout: Duration,
-    pub routing_retry_count: u32,
+    pub routing_timeout_ms: Arc<AtomicU64>,
+    pub routing_retry_count: Arc<AtomicU32>,
+    pub config_path: Option<PathBuf>,
+}
+
+impl AppState {
+    pub fn routing_timeout(&self) -> Duration {
+        Duration::from_millis(self.routing_timeout_ms.load(Ordering::Relaxed))
+    }
+
+    pub fn retry_count(&self) -> u32 {
+        self.routing_retry_count.load(Ordering::Relaxed)
+    }
+
+    pub async fn reload_config(&self) -> anyhow::Result<String> {
+        let path = self.config_path.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No config file path (started with CLI args)"))?;
+
+        let new_config = Config::from_file(path)?;
+
+        // Sync backends: remove deleted, add new, update existing
+        let existing = self.pool.all().await;
+        let new_names: std::collections::HashSet<_> =
+            new_config.backends.iter().map(|b| b.name.clone()).collect();
+
+        for name in &existing {
+            if !new_names.contains(name) {
+                self.pool.remove(name).await;
+                tracing::info!("Reload: removed backend {}", name);
+            }
+        }
+
+        for backend in &new_config.backends {
+            if existing.contains(&backend.name) {
+                if let Some(mut state) = self.pool.get(&backend.name).await {
+                    state.config = backend.clone();
+                    self.pool.update(state).await;
+                    tracing::info!("Reload: updated backend {}", backend.name);
+                }
+            } else {
+                self.pool.add(backend.clone()).await;
+                tracing::info!("Reload: added backend {}", backend.name);
+            }
+        }
+
+        // Swap router (new router shares the same pool data)
+        let new_router = create_router(
+            new_config.routing.strategy.clone(),
+            (*self.pool).clone(),
+        );
+        *self.router.write().await = new_router;
+
+        // Update timeout and retry count
+        let new_timeout = parse_duration(&new_config.routing.timeout)
+            .unwrap_or(DEFAULT_ROUTING_TIMEOUT);
+        self.routing_timeout_ms.store(new_timeout.as_millis() as u64, Ordering::Relaxed);
+        self.routing_retry_count.store(new_config.routing.retry_count, Ordering::Relaxed);
+
+        let msg = format!(
+            "Reloaded: {} backends, strategy={:?}",
+            new_config.backends.len(),
+            new_config.routing.strategy
+        );
+        tracing::info!("{}", msg);
+        Ok(msg)
+    }
 }
 
 impl Server {
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    pub fn new(config: Config, config_path: Option<PathBuf>) -> Self {
+        Self { config, config_path }
     }
 
     pub async fn run(self) -> Result<()> {
@@ -104,12 +171,13 @@ impl Server {
 
         let state = AppState {
             pool: Arc::clone(&pool),
-            router,
+            router: Arc::new(tokio::sync::RwLock::new(router)),
             client: Arc::clone(&client),
             config: self.config.clone(),
             analytics,
-            routing_timeout,
-            routing_retry_count: self.config.routing.retry_count,
+            routing_timeout_ms: Arc::new(AtomicU64::new(routing_timeout.as_millis() as u64)),
+            routing_retry_count: Arc::new(AtomicU32::new(self.config.routing.retry_count)),
+            config_path: self.config_path.clone(),
         };
 
         // Build app with routes
@@ -147,8 +215,18 @@ impl Server {
                     require_api_key,
                 ));
 
-            app = app.nest("/admin/backends", admin_routes);
+            let reload_route = axum::Router::new()
+                .route("/admin/reload", axum::routing::post(reload_handler))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    require_api_key,
+                ));
+
+            app = app.nest("/admin/backends", admin_routes).merge(reload_route);
         }
+
+        // Clone state for file watcher before it's consumed by with_state()
+        let watcher_state = state.clone();
 
         // Proxy (catch-all) + middleware layers
         let app = if self.config.server.rate_limit > 0 {
@@ -173,6 +251,36 @@ impl Server {
                     .layer(TraceLayer::new_for_http()))
                 .with_state(state)
         };
+
+        // Start config file watcher (polls every 30s)
+        if let Some(ref config_path) = self.config_path {
+            let watch_state = watcher_state;
+            let watch_path = config_path.clone();
+            let initial_mtime = std::fs::metadata(&watch_path)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            tokio::spawn(async move {
+                let mut last_mtime = initial_mtime;
+                let mut ticker = tokio::time::interval(Duration::from_secs(30));
+                ticker.tick().await; // skip first immediate tick
+                loop {
+                    ticker.tick().await;
+                    if let Ok(meta) = std::fs::metadata(&watch_path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime.map_or(false, |prev| mtime > prev) {
+                                last_mtime = Some(mtime);
+                                tracing::info!("Config file changed, reloading...");
+                                if let Err(e) = watch_state.reload_config().await {
+                                    tracing::error!("Config reload failed: {}", e);
+                                }
+                            } else if last_mtime.is_none() {
+                                last_mtime = Some(mtime);
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         // Start server
         let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -340,14 +448,27 @@ async fn proxy_handler(
         }
     }
 
+    // Extract tags from X-Herd-Tags header (comma-separated)
+    let tags: Option<Vec<String>> = headers
+        .get("x-herd-tags")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        });
+
     // Retry loop: try routing to different backends on failure
     let mut response = None;
     let mut selected_backend: Option<String> = None;
 
-    for _ in 0..=state.routing_retry_count {
+    for _ in 0..=state.retry_count() {
         let backend = state
             .router
-            .route(model_name.as_deref())
+            .read()
+            .await
+            .route(model_name.as_deref(), tags.as_deref())
             .await
             .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -358,7 +479,7 @@ async fn proxy_handler(
         let req_builder = state
             .client
             .request(method.clone(), &url)
-            .timeout(state.routing_timeout)
+            .timeout(state.routing_timeout())
             .body(body_bytes.clone());
         let req_builder = copy_request_headers(&headers, req_builder);
 
@@ -546,6 +667,21 @@ async fn analytics_handler(
     }
 }
 
+async fn reload_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Result<axum::Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    match state.reload_config().await {
+        Ok(msg) => Ok(axum::Json(serde_json::json!({
+            "status": "ok",
+            "message": msg,
+        }))),
+        Err(e) => Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Reload failed: {}", e),
+        )),
+    }
+}
+
 async fn update_check_handler() -> axum::Json<serde_json::Value> {
     const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
     const REPO: &str = "swift-innovate/herd";
@@ -643,7 +779,7 @@ async fn dashboard_handler() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../dashboard.html"))
 }
 
-pub async fn run(config: Config) -> Result<()> {
-    let server = Server::new(config);
+pub async fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
+    let server = Server::new(config, config_path);
     server.run().await
 }

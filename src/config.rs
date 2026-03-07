@@ -112,7 +112,13 @@ pub struct Backend {
     
     #[serde(default)]
     pub model_filter: Option<String>,
-    
+
+    #[serde(default)]
+    pub health_check_path: Option<String>,
+
+    #[serde(default)]
+    pub health_check_status: Option<u16>,
+
     #[serde(default)]
     pub tags: Vec<String>,
 }
@@ -126,6 +132,8 @@ impl Default for Backend {
             default_model: None,
             gpu_hot_url: None,
             model_filter: None,
+            health_check_path: None,
+            health_check_status: None,
             tags: Vec::new(),
         }
     }

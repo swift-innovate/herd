@@ -21,9 +21,15 @@ impl WeightedRoundRobinRouter {
 
 #[async_trait]
 impl Router for WeightedRoundRobinRouter {
-    async fn route(&self, _model: Option<&str>) -> anyhow::Result<RoutedBackend> {
+    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
         let backends = self.pool.backends.read().await;
-        let healthy: Vec<_> = backends.iter().filter(|b| b.healthy).collect();
+        let healthy: Vec<_> = backends
+            .iter()
+            .filter(|b| {
+                b.healthy
+                    && tags.map_or(true, |t| t.iter().all(|tag| b.config.tags.contains(tag)))
+            })
+            .collect();
 
         if healthy.is_empty() {
             return Err(anyhow::anyhow!("No healthy backends available"));
@@ -95,7 +101,7 @@ mod tests {
         let total_requests = 400;
 
         for _ in 0..total_requests {
-            let routed = router.route(None).await.unwrap();
+            let routed = router.route(None, None).await.unwrap();
             match routed.name.as_str() {
                 "heavy" => heavy_count += 1,
                 "light" => light_count += 1,
@@ -120,7 +126,7 @@ mod tests {
         let router = WeightedRoundRobinRouter::new(pool);
 
         for _ in 0..10 {
-            let routed = router.route(None).await.unwrap();
+            let routed = router.route(None, None).await.unwrap();
             assert_eq!(routed.name, "solo");
         }
     }
@@ -151,7 +157,7 @@ mod tests {
         let router = WeightedRoundRobinRouter::new(pool);
 
         for _ in 0..10 {
-            let routed = router.route(None).await.unwrap();
+            let routed = router.route(None, None).await.unwrap();
             assert_eq!(routed.name, "healthy");
         }
     }
@@ -171,6 +177,6 @@ mod tests {
         }
 
         let router = WeightedRoundRobinRouter::new(pool);
-        assert!(router.route(None).await.is_err());
+        assert!(router.route(None, None).await.is_err());
     }
 }

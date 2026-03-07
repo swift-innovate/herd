@@ -16,7 +16,7 @@ No cloud dependency. No API keys exposed. Full local control.
 
 ## Roadmap
 
-### v0.2.1 — Security Hardening (Current)
+### v0.2.1 — Security Hardening
 
 - Configurable circuit breaker (failure threshold, recovery time)
 - API key authentication for admin endpoints
@@ -25,7 +25,7 @@ No cloud dependency. No API keys exposed. Full local control.
 - CLI backend specification parser
 - Conditional route registration (admin API off by default)
 
-### v0.3.0 — Routing & Reliability (Target: April 2026)
+### v0.3.0 — Routing & Reliability ✅
 
 - ~~Retry loop with configurable attempt count~~ ✅ (shipped v0.2.1)
 - ~~Request timeout enforcement per routing strategy~~ ✅ (shipped v0.2.1)
@@ -34,9 +34,9 @@ No cloud dependency. No API keys exposed. Full local control.
 - ~~Rate limiting (global token bucket)~~ ✅ (pulled forward from v0.5.0)
 - ~~Model filter (regex-based per-backend)~~ ✅
 - ~~Dashboard polish (stats, tabs, latency percentiles, mobile responsive)~~ ✅
-- Backend tagging and tag-based routing
-- Health check endpoint customization (configurable path and expected status)
-- Hot-reload configuration without restart
+- ~~Backend tagging and tag-based routing~~ ✅
+- ~~Health check endpoint customization (configurable path and expected status)~~ ✅
+- ~~Hot-reload configuration without restart~~ ✅ (file polling + POST /admin/reload)
 
 ### v0.4.0 — Observability & Operations (Q2 2026)
 
