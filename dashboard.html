@@ -15,6 +15,7 @@
         }
         .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
+        /* Header */
         .header {
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 24px; padding-bottom: 16px;
@@ -29,8 +30,6 @@
             padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
             text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .pulse { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         .update-badge {
             background: rgba(251, 191, 36, 0.15); color: #fbbf24;
             padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
@@ -38,6 +37,16 @@
         }
         .update-badge:hover { background: rgba(251, 191, 36, 0.25); }
 
+        /* Connection indicator */
+        .conn-indicator { display: flex; gap: 2px; align-items: flex-end; height: 14px; }
+        .conn-bar { width: 3px; border-radius: 1px; background: #22c55e; animation: conn-pulse 2s infinite; }
+        .conn-bar:nth-child(1) { height: 4px; animation-delay: 0s; }
+        .conn-bar:nth-child(2) { height: 8px; animation-delay: 0.15s; }
+        .conn-bar:nth-child(3) { height: 12px; animation-delay: 0.3s; }
+        .conn-indicator.error .conn-bar { background: #ef4444; animation: none; }
+        @keyframes conn-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Buttons */
         .btn {
             background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);
             padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -48,18 +57,72 @@
         .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
         .btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 32px; }
+        /* Summary Stats */
+        .stats-row {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.8) 0%, rgba(22, 33, 62, 0.8) 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px; padding: 16px 20px;
+            position: relative; overflow: hidden;
+        }
+        .stat-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent, #818cf8), transparent);
+            opacity: 0.6;
+        }
+        .stat-value {
+            font-size: 28px; font-weight: 700; letter-spacing: -1px;
+            transition: all 0.3s ease;
+        }
+        .stat-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+        .stat-sub { font-size: 11px; color: #475569; margin-top: 2px; }
+        .stat-card:nth-child(1) { --accent: #818cf8; }
+        .stat-card:nth-child(1) .stat-value { color: #818cf8; }
+        .stat-card:nth-child(2) { --accent: #fbbf24; }
+        .stat-card:nth-child(2) .stat-value { color: #fbbf24; }
+        .stat-card:nth-child(3) { --accent: #4ade80; }
+        .stat-card:nth-child(3) .stat-value { color: #4ade80; }
+        .stat-card:nth-child(4) { --accent: #60a5fa; }
+        .stat-card:nth-child(4) .stat-value { color: #60a5fa; }
 
+        /* Tab Navigation */
+        .tab-bar {
+            display: flex; gap: 0; margin-bottom: 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .tab {
+            padding: 10px 24px; font-size: 14px; font-weight: 600; color: #64748b;
+            cursor: pointer; border-bottom: 2px solid transparent;
+            transition: all 0.2s; user-select: none;
+        }
+        .tab:hover { color: #94a3b8; }
+        .tab.active { color: #818cf8; border-bottom-color: #818cf8; }
+        .tab-badge {
+            display: inline-block; background: rgba(99, 102, 241, 0.2); color: #818cf8;
+            font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
+            margin-left: 6px; vertical-align: middle;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Backend Grid */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 16px; }
+
+        /* Backend Cards */
         .card {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             border: 1px solid rgba(255,255,255,0.06);
             border-radius: 12px; padding: 20px; position: relative;
-            transition: border-color 0.2s, transform 0.2s;
+            transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
         }
-        .card:hover { border-color: rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
-        .card.offline { opacity: 0.5; border-color: rgba(239, 68, 68, 0.4); }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .card:hover { border-color: rgba(99, 102, 241, 0.3); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .card.offline { opacity: 0.55; border-color: rgba(239, 68, 68, 0.4); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .card-name { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+        .card-url { font-size: 11px; color: #475569; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .card-actions { display: flex; gap: 6px; }
         .card-status { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
         .card-status.online { color: #4ade80; }
@@ -100,14 +163,13 @@
         .idle-timer.ok { background: rgba(34, 197, 94, 0.08); color: #22c55e; }
         .idle-timer.homing { background: rgba(239, 68, 68, 0.08); color: #ef4444; }
 
-        /* Analytics Charts Section */
-        .analytics-section {
-            margin-bottom: 32px;
+        .tags-row { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+        .tag {
+            font-size: 10px; color: #818cf8; background: rgba(99, 102, 241, 0.1);
+            padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase;
         }
-        .section-header {
-            font-size: 20px; font-weight: 700; margin-bottom: 16px;
-            display: flex; justify-content: space-between; align-items: center;
-        }
+
+        /* Analytics Charts */
         .chart-grid {
             display: grid;
             grid-template-columns: 2fr 1fr 1fr;
@@ -116,20 +178,27 @@
         .chart-card {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 12px;
-            padding: 20px;
+            border-radius: 12px; padding: 20px;
+            transition: border-color 0.3s;
         }
-        .chart-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #94a3b8;
-            margin-bottom: 12px;
-        }
-        .chart-container {
-            position: relative;
-            height: 200px;
-        }
+        .chart-card:hover { border-color: rgba(255,255,255,0.1); }
+        .chart-title { font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 12px; }
+        .chart-container { position: relative; height: 200px; }
 
+        /* Latency stats row within analytics */
+        .latency-row {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+            margin-top: 16px;
+        }
+        .latency-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px; padding: 16px; text-align: center;
+        }
+        .latency-value { font-size: 24px; font-weight: 700; color: #fbbf24; }
+        .latency-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+
+        /* Footer */
         .footer {
             margin-top: 24px; padding-top: 16px;
             border-top: 1px solid rgba(255,255,255,0.04);
@@ -166,6 +235,7 @@
         }
         .modal-actions .btn-submit:hover { background: rgba(99, 102, 241, 0.3); }
 
+        /* Toast */
         .toast {
             position: fixed; bottom: 24px; right: 24px; padding: 10px 18px; border-radius: 8px;
             font-size: 13px; font-weight: 500; z-index: 200; opacity: 0; transition: opacity 0.3s;
@@ -173,33 +243,94 @@
         .toast.show { opacity: 1; }
         .toast.success { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
         .toast.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center; padding: 48px 24px; color: #64748b;
+        }
+        .empty-state-title { font-size: 16px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; }
+        .empty-state-text { font-size: 13px; }
+
+        /* Mobile Responsive */
+        @media (max-width: 900px) {
+            .chart-grid { grid-template-columns: 1fr; }
+            .latency-row { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+            .header-right { width: 100%; justify-content: space-between; }
+            .grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 480px) {
+            .stats-row { grid-template-columns: 1fr; }
+            .latency-row { grid-template-columns: 1fr; }
+            .container { padding: 16px; }
+            .stat-value { font-size: 22px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <div class="header">
-            <h1><span>🦙</span> Herd</h1>
+            <h1><span>&#x1F999;</span> Herd</h1>
             <div class="header-right">
                 <div class="header-meta">
                     <span class="strategy-badge" id="strategy">--</span>
                     <span>Idle: <strong id="idle-timeout">--</strong>m</span>
-                    <div class="pulse"></div>
+                    <div class="conn-indicator" id="conn-indicator">
+                        <div class="conn-bar"></div>
+                        <div class="conn-bar"></div>
+                        <div class="conn-bar"></div>
+                    </div>
                     <span id="update-badge" class="update-badge" style="display:none;"></span>
                 </div>
                 <button class="btn" onclick="openAddModal()">+ Add Node</button>
             </div>
         </div>
-        
-        <div class="grid" id="backends"></div>
 
-        <!-- Analytics Charts -->
-        <div class="analytics-section">
-            <div class="section-header">
-                <span>📊 Analytics (Last 24h)</span>
+        <!-- Summary Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-requests">--</div>
+                <div class="stat-label">Requests (24h)</div>
             </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-latency">--</div>
+                <div class="stat-label">Median Latency</div>
+                <div class="stat-sub" id="stat-latency-sub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-success">--</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-backends">--</div>
+                <div class="stat-label">Online Backends</div>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-bar">
+            <div class="tab active" data-tab="backends" onclick="switchTab('backends')">
+                Backends <span class="tab-badge" id="backends-count">0</span>
+            </div>
+            <div class="tab" data-tab="analytics" onclick="switchTab('analytics')">
+                Analytics
+            </div>
+        </div>
+
+        <!-- Backends Tab -->
+        <div class="tab-content active" id="tab-backends">
+            <div class="grid" id="backends"></div>
+        </div>
+
+        <!-- Analytics Tab -->
+        <div class="tab-content" id="tab-analytics">
             <div class="chart-grid">
                 <div class="chart-card">
-                    <div class="chart-title">Request Volume</div>
+                    <div class="chart-title">Request Volume (24h)</div>
                     <div class="chart-container">
                         <canvas id="timelineChart"></canvas>
                     </div>
@@ -217,11 +348,26 @@
                     </div>
                 </div>
             </div>
+            <div class="latency-row">
+                <div class="latency-card">
+                    <div class="latency-value" id="lat-p50">--</div>
+                    <div class="latency-label">p50 Latency</div>
+                </div>
+                <div class="latency-card">
+                    <div class="latency-value" id="lat-p95">--</div>
+                    <div class="latency-label">p95 Latency</div>
+                </div>
+                <div class="latency-card">
+                    <div class="latency-value" id="lat-p99">--</div>
+                    <div class="latency-label">p99 Latency</div>
+                </div>
+            </div>
         </div>
 
+        <!-- Footer -->
         <div class="footer">
             <span id="last-update">Updating...</span>
-            <span id="version-info">Herd v0.1.0</span>
+            <span id="version-info">Herd v0.2.1</span>
         </div>
     </div>
 
@@ -238,9 +384,9 @@
             <label for="f-priority">Priority (higher = preferred)</label>
             <input id="f-priority" type="number" value="50" min="1" max="200">
             <label for="f-default">Default Model</label>
-            <input id="f-default" placeholder="e.g. glm-4.7-flash:latest">
-            <label for="f-filter">Model Filter (optional)</label>
-            <input id="f-filter" placeholder="e.g. ≤8B">
+            <input id="f-default" placeholder="e.g. llama3:8b">
+            <label for="f-filter">Model Filter (regex, optional)</label>
+            <input id="f-filter" placeholder="e.g. llama|qwen">
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeModal()">Cancel</button>
                 <button class="btn-submit" onclick="submitModal()">Save</button>
@@ -253,17 +399,50 @@
 
     <script>
         let timelineChart, modelChart, backendChart;
+        let refreshCountdown = 5;
+        let countdownTimer;
 
+        // -- Tab System --
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
+            document.getElementById(`tab-${name}`).classList.add('active');
+            sessionStorage.setItem('herd-tab', name);
+            // Trigger chart resize when switching to analytics
+            if (name === 'analytics') {
+                setTimeout(() => {
+                    timelineChart?.resize();
+                    modelChart?.resize();
+                    backendChart?.resize();
+                }, 50);
+            }
+        }
+
+        // Restore last tab
+        const savedTab = sessionStorage.getItem('herd-tab');
+        if (savedTab) switchTab(savedTab);
+
+        // -- Helpers --
         function formatIdle(seconds) {
             if (seconds < 60) return `${seconds}s`;
             if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
             return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
         }
 
+        function formatMs(ms) {
+            if (ms < 1000) return `${ms}ms`;
+            return `${(ms / 1000).toFixed(1)}s`;
+        }
+
         function gpuClass(pct) {
             if (pct < 50) return 'low';
             if (pct < 80) return 'medium';
             return 'high';
+        }
+
+        function truncate(str, len) {
+            return str.length > len ? str.substring(0, len) + '...' : str;
         }
 
         function showToast(msg, type = 'success') {
@@ -273,6 +452,7 @@
             setTimeout(() => t.className = 'toast', 3000);
         }
 
+        // -- Modal --
         function openAddModal() {
             document.getElementById('modal-title').textContent = 'Add Node';
             document.getElementById('modal-mode').value = 'add';
@@ -301,9 +481,7 @@
             });
         }
 
-        function closeModal() {
-            document.getElementById('modal-overlay').classList.remove('active');
-        }
+        function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
 
         async function submitModal() {
             const mode = document.getElementById('modal-mode').value;
@@ -338,9 +516,7 @@
                 }
                 closeModal();
                 refresh();
-            } catch (e) {
-                showToast(`Error: ${e.message}`, 'error');
-            }
+            } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
         }
 
         async function removeBackend(name) {
@@ -352,6 +528,7 @@
             } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
         }
 
+        // -- Backend Card Rendering --
         function renderCard(b, idleTimeout) {
             const isOnline = b.healthy;
             const cls = isOnline ? 'online' : 'offline';
@@ -370,52 +547,59 @@
                 const pct = g.memory_total > 0 ? Math.round((g.memory_used / g.memory_total) * 100) : 0;
                 gpuHtml = `
                     <div class="gpu-bar">
-                        <div class="gpu-bar-label"><span>GPU Utilization</span><span>${g.utilization.toFixed(0)}%</span></div>
+                        <div class="gpu-bar-label"><span>GPU</span><span>${g.utilization.toFixed(0)}%</span></div>
                         <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(g.utilization)}" style="width:${g.utilization}%"></div></div>
                     </div>
                     <div class="gpu-bar">
-                        <div class="gpu-bar-label"><span>VRAM</span><span>${usedGB} / ${totalGB} GB (${pct}%)</span></div>
+                        <div class="gpu-bar-label"><span>VRAM</span><span>${usedGB}/${totalGB} GB</span></div>
                         <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(pct)}" style="width:${pct}%"></div></div>
                     </div>
-                    <div class="gpu-stats">
-                        <span class="gpu-stat">Temp: ${g.temperature.toFixed(0)}°C</span>
-                    </div>
+                    <div class="gpu-stats"><span class="gpu-stat">${g.temperature.toFixed(0)}°C</span></div>
                 `;
+            }
+
+            let tagsHtml = '';
+            if (b.tags && b.tags.length > 0) {
+                tagsHtml = `<div class="tags-row">${b.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>`;
             }
 
             let idleHtml = '';
             if (dflt && !modelsMatch) {
                 const remaining = Math.max(0, idleThresh - idle);
                 let timerClass = 'warning';
-                let label = `Returning to default in ${formatIdle(remaining)}`;
-                if (remaining <= 0) { timerClass = 'homing'; label = '⏳ Homing to default model...'; }
+                let label = `Default in ${formatIdle(remaining)}`;
+                if (remaining <= 0) { timerClass = 'homing'; label = 'Homing to default...'; }
                 idleHtml = `<div class="idle-timer ${timerClass}"><span>${label}</span><span>${idlePct}%</span></div>`;
             } else if (dflt && modelsMatch) {
-                idleHtml = `<div class="idle-timer ok"><span>✓ Running default model</span><span>Idle: ${formatIdle(idle)}</span></div>`;
+                idleHtml = `<div class="idle-timer ok"><span>Running default</span><span>${formatIdle(idle)}</span></div>`;
             }
 
+            const urlDisplay = b.url ? truncate(b.url, 40) : '';
+
             return `
-                <div class="card ${cls}">
+                <div class="card ${isOnline ? '' : 'offline'}">
                     <div class="card-header">
                         <span class="card-name">${b.name}</span>
                         <div class="card-actions">
-                            <button class="btn btn-sm" onclick="openEditModal('${b.name}')">✏️ Edit</button>
-                            <button class="btn btn-sm btn-danger" onclick="removeBackend('${b.name}')">✕</button>
+                            <button class="btn btn-sm" onclick="openEditModal('${b.name}')">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeBackend('${b.name}')">&#x2715;</button>
                         </div>
                     </div>
+                    <div class="card-url">${urlDisplay}</div>
+                    ${tagsHtml}
                     <div class="meta">
-                        <span class="meta-item">Priority: <strong>${b.priority}</strong></span>
+                        <span class="meta-item">P: <strong>${b.priority}</strong></span>
                         <span class="meta-item">Models: <strong>${b.model_count || b.models?.length || 0}</strong></span>
                         <span class="card-status ${cls}"><span class="dot ${cls}"></span>${isOnline ? 'Online' : 'Offline'}</span>
                     </div>
                     ${gpuHtml}
                     <div class="model-section">
                         <div class="model-row">
-                            <span class="model-label">Current Model</span>
+                            <span class="model-label">Current</span>
                             <span class="model-value ${current ? (modelsMatch ? 'match' : '') : 'none'}">${current || 'None'}</span>
                         </div>
                         <div class="model-row">
-                            <span class="model-label">Default Model</span>
+                            <span class="model-label">Default</span>
                             <span class="model-value" style="color:#94a3b8">${dflt || 'Not set'}</span>
                         </div>
                     </div>
@@ -424,78 +608,45 @@
             `;
         }
 
+        // -- Charts --
         function initCharts() {
-            const chartOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                }
+            const opts = {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } }
             };
 
-            // Timeline chart (line)
             timelineChart = new Chart(document.getElementById('timelineChart'), {
                 type: 'line',
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Requests',
-                        data: [],
-                        borderColor: '#818cf8',
-                        backgroundColor: 'rgba(129, 140, 248, 0.1)',
-                        fill: true,
-                        tension: 0.4,
+                        label: 'Requests', data: [],
+                        borderColor: '#818cf8', backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                        fill: true, tension: 0.4, pointRadius: 2,
                     }]
                 },
-                options: {
-                    ...chartOptions,
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
-                        x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0 } }
-                    }
-                }
+                options: { ...opts, scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                    x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0, maxTicksLimit: 12 } }
+                }}
             });
 
-            // Model chart (bar)
             modelChart = new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Requests',
-                        data: [],
-                        backgroundColor: '#818cf8',
-                    }]
-                },
-                options: {
-                    ...chartOptions,
-                    indexAxis: 'y',
-                    scales: {
-                        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
-                        y: { grid: { display: false }, ticks: { color: '#64748b' } }
-                    }
-                }
+                data: { labels: [], datasets: [{ label: 'Requests', data: [], backgroundColor: '#818cf8', borderRadius: 4 }] },
+                options: { ...opts, indexAxis: 'y', scales: {
+                    x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                    y: { grid: { display: false }, ticks: { color: '#64748b' } }
+                }}
             });
 
-            // Backend chart (bar)
             backendChart = new Chart(document.getElementById('backendChart'), {
                 type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Requests',
-                        data: [],
-                        backgroundColor: '#4ade80',
-                    }]
-                },
-                options: {
-                    ...chartOptions,
-                    indexAxis: 'y',
-                    scales: {
-                        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
-                        y: { grid: { display: false }, ticks: { color: '#64748b' } }
-                    }
-                }
+                data: { labels: [], datasets: [{ label: 'Requests', data: [], backgroundColor: '#4ade80', borderRadius: 4 }] },
+                options: { ...opts, indexAxis: 'y', scales: {
+                    x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
+                    y: { grid: { display: false }, ticks: { color: '#64748b' } }
+                }}
             });
         }
 
@@ -504,26 +655,49 @@
                 const res = await fetch('/analytics?hours=24');
                 const data = await res.json();
 
-                // Timeline chart
-                const times = data.timeline.map(t => new Date(t[0] * 1000).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}));
-                const counts = data.timeline.map(t => t[1]);
-                timelineChart.data.labels = times.slice(-20); // Last 20 data points
-                timelineChart.data.datasets[0].data = counts.slice(-20);
-                timelineChart.update();
+                // Stats
+                document.getElementById('stat-requests').textContent = (data.total_requests || 0).toLocaleString();
+                const rate = data.total_requests > 0
+                    ? Math.round(((data.total_requests - (data.error_count || 0)) / data.total_requests) * 100)
+                    : 100;
+                document.getElementById('stat-success').textContent = `${rate}%`;
 
-                // Model chart (top 5)
-                const models = Object.entries(data.model_counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-                modelChart.data.labels = models.map(m => m[0].split(':')[0]);
-                modelChart.data.datasets[0].data = models.map(m => m[1]);
-                modelChart.update();
+                // Latency
+                const p50 = data.p50_ms || 0;
+                const p95 = data.p95_ms || 0;
+                const p99 = data.p99_ms || 0;
+                document.getElementById('stat-latency').textContent = formatMs(p50);
+                document.getElementById('stat-latency-sub').textContent = p95 ? `p95: ${formatMs(p95)}` : '';
+                document.getElementById('lat-p50').textContent = formatMs(p50);
+                document.getElementById('lat-p95').textContent = formatMs(p95);
+                document.getElementById('lat-p99').textContent = formatMs(p99);
 
-                // Backend chart
-                const backends = Object.entries(data.backend_counts).sort((a, b) => b[1] - a[1]);
-                backendChart.data.labels = backends.map(b => b[0]);
-                backendChart.data.datasets[0].data = backends.map(b => b[1]);
-                backendChart.update();
+                // Timeline
+                if (data.timeline) {
+                    const times = data.timeline.map(t => new Date(t[0] * 1000).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}));
+                    const counts = data.timeline.map(t => t[1]);
+                    timelineChart.data.labels = times.slice(-24);
+                    timelineChart.data.datasets[0].data = counts.slice(-24);
+                    timelineChart.update('none');
+                }
+
+                // Models (top 5)
+                if (data.model_counts) {
+                    const models = Object.entries(data.model_counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                    modelChart.data.labels = models.map(m => m[0].split(':')[0]);
+                    modelChart.data.datasets[0].data = models.map(m => m[1]);
+                    modelChart.update('none');
+                }
+
+                // Backends
+                if (data.backend_counts) {
+                    const backends = Object.entries(data.backend_counts).sort((a, b) => b[1] - a[1]);
+                    backendChart.data.labels = backends.map(b => b[0]);
+                    backendChart.data.datasets[0].data = backends.map(b => b[1]);
+                    backendChart.update('none');
+                }
             } catch (e) {
-                console.error('Failed to update charts:', e);
+                console.error('Charts update failed:', e);
             }
         }
 
@@ -538,12 +712,12 @@
                     badge.onclick = () => window.open(data.download_url, '_blank');
                 }
                 document.getElementById('version-info').textContent = `Herd v${data.current}`;
-            } catch (e) {
-                console.error('Update check failed:', e);
-            }
+            } catch (e) {}
         }
 
+        // -- Main Refresh --
         async function refresh() {
+            const conn = document.getElementById('conn-indicator');
             try {
                 const [statusRes, gpuRes] = await Promise.all([
                     fetch('/status'),
@@ -552,31 +726,46 @@
                 const data = await statusRes.json();
                 const all = [...(data.healthy_backends || []), ...(data.unhealthy_backends || [])];
                 const timeout = data.idle_timeout_minutes || 30;
+                const healthyCount = (data.healthy_backends || []).length;
 
-                // Build a map of backend name -> first GPU from /gpu endpoint
+                // GPU map
                 let gpuMap = {};
                 if (gpuRes && gpuRes.ok) {
                     const gpuData = await gpuRes.json();
                     if (gpuData.available && gpuData.backends) {
-                        for (const [name, backendData] of Object.entries(gpuData.backends)) {
-                            const gpus = Array.isArray(backendData.gpus) ? backendData.gpus : Object.values(backendData.gpus || {});
+                        for (const [name, bd] of Object.entries(gpuData.backends)) {
+                            const gpus = Array.isArray(bd.gpus) ? bd.gpus : Object.values(bd.gpus || {});
                             if (gpus.length > 0) gpuMap[name] = gpus[0];
                         }
                     }
                 }
+                for (const b of all) { if (!b.gpu && gpuMap[b.name]) b.gpu = gpuMap[b.name]; }
 
-                // Merge /gpu data onto each backend (prefer cached gpu_metrics, fall back to live /gpu)
-                for (const b of all) {
-                    if (!b.gpu && gpuMap[b.name]) b.gpu = gpuMap[b.name];
-                }
-
+                // Update UI
                 document.getElementById('strategy').textContent = data.routing_strategy || '--';
                 document.getElementById('idle-timeout').textContent = timeout;
-                document.getElementById('backends').innerHTML = all.map(b => renderCard(b, timeout)).join('');
-                document.getElementById('last-update').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+                document.getElementById('backends').innerHTML = all.length > 0
+                    ? all.map(b => renderCard(b, timeout)).join('')
+                    : '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-title">No backends configured</div><div class="empty-state-text">Click "+ Add Node" to add an Ollama backend</div></div>';
+                document.getElementById('backends-count').textContent = all.length;
+                document.getElementById('stat-backends').textContent = `${healthyCount}/${all.length}`;
+
+                conn.classList.remove('error');
+                refreshCountdown = 5;
+                document.getElementById('last-update').textContent = `Updated ${new Date().toLocaleTimeString()}`;
             } catch (e) {
-                document.getElementById('last-update').textContent = `Error: ${e.message}`;
+                conn.classList.add('error');
+                document.getElementById('last-update').textContent = `Connection error`;
             }
+        }
+
+        // Countdown timer
+        function startCountdown() {
+            clearInterval(countdownTimer);
+            countdownTimer = setInterval(() => {
+                refreshCountdown--;
+                if (refreshCountdown <= 0) refreshCountdown = 5;
+            }, 1000);
         }
 
         // Close modal on escape
@@ -590,6 +779,7 @@
         refresh();
         updateCharts();
         checkUpdate();
+        startCountdown();
         setInterval(refresh, 5000);
         setInterval(updateCharts, 30000);
     </script>
