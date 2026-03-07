@@ -51,10 +51,23 @@ pub async fn chat_completions(
         .ok()
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from));
 
-    // Route to backend based on model
+    // Extract tags from X-Herd-Tags header (comma-separated)
+    let tags: Option<Vec<String>> = headers
+        .get("x-herd-tags")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        });
+
+    // Route to backend based on model and tags
     let backend = state
         .router
-        .route(model_name.as_deref())
+        .read()
+        .await
+        .route(model_name.as_deref(), tags.as_deref())
         .await
         .map_err(|_| {
             openai_error(
@@ -91,7 +104,7 @@ pub async fn chat_completions(
     let mut req_builder = state
         .client
         .request(method, &url)
-        .timeout(state.routing_timeout)
+        .timeout(state.routing_timeout())
         .body(body_bytes.clone());
 
     for (name, value) in &headers {

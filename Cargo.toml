@@ -1,6 +1,6 @@
 [package]
 name = "herd"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 authors = ["Swift Innovative Technologies"]
 description = "Intelligent Ollama router with GPU awareness"

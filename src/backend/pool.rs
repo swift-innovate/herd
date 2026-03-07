@@ -161,6 +161,52 @@ impl BackendPool {
         }
     }
 
+    pub async fn get_healthy_with_tags(&self, tags: &[String]) -> Vec<String> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
+            .map(|b| b.config.name.clone())
+            .collect()
+    }
+
+    pub async fn get_by_priority_tagged(&self, tags: &[String]) -> Option<BackendState> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
+            .max_by_key(|b| b.config.priority)
+            .cloned()
+    }
+
+    pub async fn get_by_model_tagged(&self, model: &str, tags: &[String]) -> Option<BackendState> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .filter(|b| {
+                b.healthy
+                    && b.models.contains(&model.to_string())
+                    && tags.iter().all(|t| b.config.tags.contains(t))
+            })
+            .max_by_key(|b| b.config.priority)
+            .cloned()
+    }
+
+    pub async fn get_least_busy_tagged(&self, tags: &[String]) -> Option<BackendState> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
+            .min_by(|a, b| {
+                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                a_busy
+                    .partial_cmp(&b_busy)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned()
+    }
+
     pub async fn touch_request(&self, name: &str) {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
@@ -330,5 +376,39 @@ mod tests {
         let result = pool.get_by_model("llama3").await;
         assert!(result.is_some());
         assert_eq!(result.unwrap().config.name, "gpu1");
+    }
+
+    #[tokio::test]
+    async fn get_healthy_with_tags_filters() {
+        let pool = BackendPool::new(
+            vec![
+                Backend {
+                    name: "a".into(),
+                    url: "http://a:11434".into(),
+                    priority: 100,
+                    tags: vec!["gpu".into(), "fast".into()],
+                    ..Default::default()
+                },
+                Backend {
+                    name: "b".into(),
+                    url: "http://b:11434".into(),
+                    priority: 50,
+                    tags: vec!["cpu".into()],
+                    ..Default::default()
+                },
+            ],
+            3,
+            Duration::from_secs(60),
+        );
+        let gpu = pool.get_healthy_with_tags(&["gpu".into()]).await;
+        assert_eq!(gpu, vec!["a"]);
+        let cpu = pool.get_healthy_with_tags(&["cpu".into()]).await;
+        assert_eq!(cpu, vec!["b"]);
+        let both = pool
+            .get_healthy_with_tags(&["gpu".into(), "fast".into()])
+            .await;
+        assert_eq!(both, vec!["a"]);
+        let none = pool.get_healthy_with_tags(&["nonexistent".into()]).await;
+        assert!(none.is_empty());
     }
 }

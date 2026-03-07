@@ -36,8 +36,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let config = if let Some(config_path) = cli.config {
-        Config::from_file(&config_path)?
+    let (config, config_path) = if let Some(config_path) = cli.config {
+        let config = Config::from_file(&config_path)?;
+        (config, Some(config_path))
     } else {
         let mut config = Config::default();
         config.server.host = cli.host;
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        config
+        (config, None)
     };
 
     tracing::info!(
@@ -60,5 +61,5 @@ async fn main() -> anyhow::Result<()> {
         config.backends.len()
     );
 
-    server::run(config).await
+    server::run(config, config_path).await
 }

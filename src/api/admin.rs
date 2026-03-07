@@ -120,6 +120,8 @@ pub async fn add_backend(
         default_model: req.default_model,
         gpu_hot_url: None,
         model_filter: req.model_filter,
+        health_check_path: None,
+        health_check_status: None,
         tags: req.tags,
     };
     

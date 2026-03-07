@@ -15,13 +15,13 @@ impl PriorityRouter {
 
 #[async_trait]
 impl Router for PriorityRouter {
-    async fn route(&self, _model: Option<&str>) -> anyhow::Result<RoutedBackend> {
-        // Route to highest priority healthy backend
-        let backend = self
-            .pool
-            .get_by_priority()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
+    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
+        let backend = if let Some(tags) = tags {
+            self.pool.get_by_priority_tagged(tags).await
+        } else {
+            self.pool.get_by_priority().await
+        }
+        .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 
         Ok(RoutedBackend {
             name: backend.config.name.clone(),
@@ -55,7 +55,7 @@ mod tests {
         );
         let router = PriorityRouter::new(pool);
 
-        let result = router.route(None).await.unwrap();
+        let result = router.route(None, None).await.unwrap();
         assert_eq!(result.name, "high");
     }
 
@@ -71,7 +71,7 @@ mod tests {
         pool.mark_unhealthy("high").await;
 
         let router = PriorityRouter::new(pool);
-        let result = router.route(None).await.unwrap();
+        let result = router.route(None, None).await.unwrap();
         assert_eq!(result.name, "low");
     }
 
@@ -86,7 +86,7 @@ mod tests {
         pool.mark_unhealthy("only").await;
 
         let router = PriorityRouter::new(pool);
-        let result = router.route(None).await;
+        let result = router.route(None, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -94,5 +94,32 @@ mod tests {
                 .to_string()
                 .contains("No healthy backends")
         );
+    }
+
+    #[tokio::test]
+    async fn routes_with_tag_filter() {
+        let pool = BackendPool::new(
+            vec![
+                Backend {
+                    name: "high".into(),
+                    url: "http://high:11434".into(),
+                    priority: 100,
+                    tags: vec!["cpu".into()],
+                    ..Default::default()
+                },
+                Backend {
+                    name: "low".into(),
+                    url: "http://low:11434".into(),
+                    priority: 10,
+                    tags: vec!["gpu".into()],
+                    ..Default::default()
+                },
+            ],
+            3,
+            Duration::from_secs(60),
+        );
+        let router = PriorityRouter::new(pool);
+        let result = router.route(None, Some(&["gpu".into()])).await.unwrap();
+        assert_eq!(result.name, "low"); // lower priority but matches tag
     }
 }
