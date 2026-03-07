@@ -26,12 +26,16 @@ pub struct Config {
 pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
-    
+
     #[serde(default = "default_port")]
     pub port: u16,
 
     #[serde(default)]
     pub api_key: Option<String>,
+
+    /// Global rate limit in requests per second. 0 = unlimited.
+    #[serde(default)]
+    pub rate_limit: u64,
 }
 
 impl Default for ServerConfig {
@@ -40,6 +44,7 @@ impl Default for ServerConfig {
             host: default_host(),
             port: default_port(),
             api_key: None,
+            rate_limit: 0,
         }
     }
 }
