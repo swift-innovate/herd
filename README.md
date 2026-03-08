@@ -4,7 +4,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/swift-innovate/herd?style=social)](https://github.com/swift-innovate/herd/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
-[![Roadmap](https://img.shields.io/badge/roadmap-v0.3%20agent%20gateway-blue)](ROADMAP.md)
+[![Roadmap](https://img.shields.io/badge/roadmap-v0.3%20routing%20%26%20reliability-blue)](ROADMAP.md)
 
 **Intelligent Ollama router with GPU awareness, analytics, and real-time monitoring.**
 
@@ -14,11 +14,15 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 
 ### Core Routing
 - **Priority-based routing** — Route to the best GPU first
+- **Model-aware routing** — Route to nodes with models already loaded
+- **Weighted round-robin** — Distribute by priority weight (new in v0.3.0)
+- **Least-busy routing** — Route to lowest GPU utilization
+- **Tag-based routing** — Filter by `X-Herd-Tags` header (new in v0.3.0)
 - **Circuit breaker** — Auto-recover from failed nodes
-- **Model-aware** — Route to nodes with models already loaded
 - **Model homing** — Auto-load default models on idle nodes
-- **Hot reload** — Add/remove nodes without restart via API
-- **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint for any OpenAI client
+- **Hot-reload config** — File watcher + `POST /admin/reload` (new in v0.3.0)
+- **Rate limiting** — Global token-bucket rate limiter
+- **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint
 
 ### Observability (New in v0.2.0) 📊
 - **Request analytics** — JSONL logging with 7-day auto-retention
@@ -31,7 +35,7 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Update checker** — Automatic GitHub release notifications
 - **Prometheus metrics** — `/metrics` endpoint for Grafana
 
-> **Herd is growing.** Multi-agent orchestration, session management, and a permission engine are coming in v0.3.0. See the [Roadmap](ROADMAP.md).
+> **v0.3.0 is here.** Tag routing, weighted round-robin, hot-reload, and health check customization. See the [Roadmap](ROADMAP.md) for what's next.
 
 ## Quick Start
 
@@ -56,9 +60,11 @@ herd --port 40114 \
 server:
   host: "0.0.0.0"
   port: 40114
+  api_key: "your-secret-key"  # Required for admin API
+  rate_limit: 0               # Requests/sec (0 = unlimited)
 
 routing:
-  strategy: "model_aware"  # priority | model_aware | least_busy
+  strategy: "model_aware"  # priority | model_aware | least_busy | weighted_round_robin
   timeout: 120s
   retry_count: 2
 
@@ -66,7 +72,9 @@ backends:
   - name: "citadel-5090"
     url: "http://citadel:11434"
     priority: 100
-    gpu_hot_url: "http://citadel:1312"  # Optional: GPU metrics
+    gpu_hot_url: "http://citadel:1312"
+    tags: ["gpu", "fast"]              # For tag-based routing
+    health_check_path: "/api/version"  # Custom health endpoint
 
   - name: "minipc-4080"
     url: "http://minipc:11434"
@@ -125,6 +133,7 @@ All `/v1/*` requests use the same intelligent routing as native Ollama calls —
 | `GET /admin/backends/:name` | Get backend details |
 | `PUT /admin/backends/:name` | Update backend config |
 | `DELETE /admin/backends/:name` | Remove backend |
+| `POST /admin/reload` | Hot-reload config file (when enabled, API key required) |
 
 ## Analytics & Monitoring (v0.2.0)
 
@@ -297,6 +306,9 @@ Herd will route based on:
 | Admin API | ✅ | ❌ |
 | OpenAI-compatible API | ✅ | ❌ |
 | Streaming completions | ✅ | ❌ |
+| Tag-based routing | ✅ | ❌ |
+| Hot-reload config | ✅ | ❌ |
+| Rate limiting | ✅ | ❌ |
 | Language | Rust | Go |
 
 ## License

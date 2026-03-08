@@ -57,27 +57,27 @@ cargo audit
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| Auth required for operations | ⚠️ WARN | **No authentication implemented** |
-| Rate limiting | ❌ FAIL | **No rate limiting implemented** |
-| Admin API protection | ⚠️ WARN | `/admin/*` endpoints are open |
+| Auth required for operations | ✅ PASS | API key auth via X-API-Key header or Bearer token |
+| Rate limiting | ✅ PASS | Global token-bucket rate limiter (configurable) |
+| Admin API protection | ✅ PASS | Requires API key (constant-time comparison) |
 
 ### Findings
 
-**⚠️ WARNING — No Authentication:**
+**✅ PASS — Authentication Implemented (v0.2.1):**
 
-Herd currently has NO authentication. Anyone who can reach the server can:
-- Route requests to any backend
-- Add/remove backends via `/admin/backends`
-- View all backend status via `/status`
+Herd now requires API key authentication for admin endpoints:
+- `/admin/backends/*` — CRUD operations
+- `/admin/reload` — Config hot-reload
+- Supports `X-API-Key` header and `Authorization: Bearer <key>`
+- Uses constant-time comparison to prevent timing attacks
+- Rate limiting via configurable token-bucket (requests/sec)
 
 ### Recommendations
 
-1. **Add authentication** — Require API key for `/admin/*` endpoints
-2. **Add rate limiting** — Prevent abuse of proxy
+1. ~~Add authentication~~ ✅ Done (v0.2.1)
+2. ~~Add rate limiting~~ ✅ Done (v0.2.1)
 3. **Network isolation** — Only expose on internal network (Tailscale)
-4. **Future: Add auth middleware** — Tower middleware for bearer tokens
-
-**For Tier 3 (Experiments):** Acceptable for now. **For Tier 1 (SaaS):** BLOCKER.
+4. **Future: Per-client rate limiting** — Rate limit per API key (planned v0.5.0)
 
 ---
 
@@ -154,8 +154,8 @@ ENTRYPOINT ["herd"]
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| Rate limiting | ❌ FAIL | Not implemented |
-| Auth middleware | ❌ FAIL | Not implemented |
+| Rate limiting | ✅ PASS | Token-bucket, configurable requests/sec |
+| Auth middleware | ✅ PASS | API key auth for admin endpoints |
 | Error messages | ✅ PASS | Generic errors, no stack traces |
 | CORS | ✅ PASS | Not configured (internal use) |
 
@@ -167,11 +167,11 @@ ENTRYPOINT ["herd"]
 |----------|--------|----------|
 | Secrets | ✅ PASS | No |
 | Dependencies | ⏳ PENDING | Needs `cargo audit` |
-| Authentication | ⚠️ WARN | **No auth** — OK for internal, blocker for public |
+| Authentication | ✅ PASS | API key auth for admin/agent endpoints |
 | Input Validation | ⚠️ WARN | Acceptable for MVP |
 | Data Protection | ⚠️ WARN | HTTP only, logging concerns |
 | Container | ⚠️ WARN | Runs as root |
-| API Security | ❌ FAIL | No rate limiting, no auth |
+| API Security | ✅ PASS | Auth + rate limiting implemented |
 
 ---
 
@@ -185,9 +185,9 @@ Herd is suitable for internal use on trusted networks (Tailscale). Do NOT expose
 
 Required before deployment:
 1. ~~Install Rust, run `cargo audit`~~ ✅ DONE
-2. Add authentication for `/admin/*` endpoints
+2. ~~Add authentication for `/admin/*` endpoints~~ ✅ Done
 3. Run as non-root user in container
-4. Add rate limiting
+4. ~~Add rate limiting~~ ✅ Done
 5. Put behind TLS proxy
 
 ---
@@ -198,7 +198,8 @@ Required before deployment:
 2. [x] Run `cargo audit` — 1 warning (unmaintained dep, no vulns)
 3. [ ] Add non-root user to Dockerfile
 4. [ ] Deploy behind Caddy/nginx with TLS
-5. [ ] Add API key auth for admin endpoints (when promoted to Tier 1/2)
+5. [x] Add API key auth for admin endpoints ✅ Done (v0.2.1)
+6. [x] Add rate limiting ✅ Done (v0.2.1)
 
 ---
 
