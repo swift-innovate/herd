@@ -1,38 +1,47 @@
-# v0.4.0 — Complete
+# Auto-Update Feature — Complete
 
-## Step 1: Prometheus-native metrics export
-- [x] Create `src/metrics.rs` with `Metrics` struct (request counters by status/backend)
-- [x] Implement `LatencyHistogram` with cumulative buckets (10–10000ms)
-- [x] Wire `record_request()` into proxy_handler and chat_completions
-- [x] Add `/metrics` endpoint rendering Prometheus exposition format
-- [x] Tests (histogram_buckets_cumulative, records_and_renders_metrics)
-- [x] Validate build
+## Step 1: Add `self_update` dependency
+- [x] Add `self_update` crate to Cargo.toml (v0.42, with archive-zip, archive-tar, compression features)
+- [x] Validate build (85 new transitive deps)
 
-## Step 2: Request tracing with correlation IDs
-- [x] Add `uuid` dependency for UUID v4 generation
-- [x] Extract or generate `X-Request-Id` in proxy_handler and chat_completions
-- [x] Forward `X-Request-Id` to upstream backends
-- [x] Include `X-Request-Id` in response headers
-- [x] Add `request_id` field to `RequestLog` (backward-compatible with serde defaults)
-- [x] Tests (request_log serialization/deserialization with and without request_id)
-- [x] Validate build
+## Step 2: Create `src/updater.rs` module
+- [x] Implement `check_for_update()` — returns UpdateInfo with current/latest/update_available
+- [x] Implement `perform_update()` — downloads + replaces binary from GitHub Releases
+- [x] Implement `startup_update_check()` — background async notification on server start
+- [x] Version comparison logic with `v` prefix handling
+- [x] Register module in `lib.rs`
+- [x] Tests (version_comparison_newer, version_comparison_same_or_older, version_comparison_handles_v_prefix)
 
-## Step 3: Log rotation and retention policies
-- [x] Add `log_retention_days`, `log_max_size_mb`, `log_max_files` to `ObservabilityConfig`
-- [x] Implement `rotate_if_needed(max_size_mb, max_files)` in Analytics
-- [x] Wire rotation into cleanup task with configurable retention
-- [x] Tests (config_defaults, config_deserializes_log_settings)
-- [x] Validate build
+## Step 3: CLI `--update` flag
+- [x] Add `--update` flag to Cli struct in `main.rs`
+- [x] When `--update` is passed, check + download + exit
+- [x] Progress bar shown for CLI downloads
 
-## Step 4: Validation & version bump
-- [x] All 34 tests pass
-- [x] ROADMAP.md updated — v0.4.0 fully complete
-- [x] Version bumped to 0.4.0
+## Step 4: `POST /admin/update` endpoint
+- [x] Add endpoint in `server.rs` (behind auth middleware)
+- [x] Returns JSON with update status/result
+- [x] Notifies that restart is required after update
+
+## Step 5: Startup update check
+- [x] Background `spawn_blocking` check on server start
+- [x] Logs info message if update is available
+
+## Step 6: Refactor `/update` endpoint
+- [x] Replaced manual GitHub API call with `updater::check_for_update()`
+- [x] Consistent version checking across CLI, API, and startup
+
+## Step 7: Validation
+- [x] Build passes
+- [x] All 37 tests pass (34 existing + 3 new)
+- [x] README updated with auto-update docs
 - [x] Ready to commit
 
 ## Review
-- v0.4.0 is fully complete with all 3 roadmap items done
-- Test coverage: 34 tests (up from 27 in v0.3.0)
-- Key features: Prometheus metrics (counters + histogram), correlation IDs (X-Request-Id), log rotation
-- Zero new external dependencies for metrics (in-memory atomics)
-- Backward-compatible RequestLog (request_id uses serde default)
+- Auto-update uses `self_update` crate for GitHub Releases integration
+- `herd --update`: CLI-triggered update with progress bar
+- `POST /admin/update`: API-triggered update (auth required), returns JSON
+- `GET /update`: Check-only (no install), now uses same updater module
+- Startup: background check with log notification
+- `self_update` handles Windows binary replacement (rename trick) automatically
+- Platform matching via target triple (e.g., x86_64-pc-windows-msvc)
+- Requires GitHub Releases with platform-specific assets to function

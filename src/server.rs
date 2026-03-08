@@ -234,6 +234,7 @@ impl Server {
 
             let reload_route = axum::Router::new()
                 .route("/admin/reload", axum::routing::post(reload_handler))
+                .route("/admin/update", axum::routing::post(update_self_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     require_api_key,
@@ -737,40 +738,51 @@ async fn reload_handler(
 }
 
 async fn update_check_handler() -> axum::Json<serde_json::Value> {
-    const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-    const REPO: &str = "swift-innovate/herd";
-
-    let client = reqwest::Client::new();
-    let url = format!("https://api.github.com/repos/{}/releases/latest", REPO);
-
-    match client.get(&url)
-        .header("User-Agent", "Herd")
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if let Ok(release) = response.json::<serde_json::Value>().await {
-                let latest = release["tag_name"].as_str().unwrap_or(CURRENT_VERSION).trim_start_matches('v');
-                axum::Json(serde_json::json!({
-                    "current": CURRENT_VERSION,
-                    "latest": latest,
-                    "update_available": latest != CURRENT_VERSION,
-                    "download_url": release["html_url"].as_str(),
-                }))
-            } else {
-                axum::Json(serde_json::json!({
-                    "current": CURRENT_VERSION,
-                    "error": "Failed to parse release info"
-                }))
-            }
-        },
-        Err(e) => {
-            axum::Json(serde_json::json!({
-                "current": CURRENT_VERSION,
-                "error": format!("Failed to check for updates: {}", e)
-            }))
-        }
+    match tokio::task::spawn_blocking(crate::updater::check_for_update).await {
+        Ok(Ok(info)) => axum::Json(serde_json::json!({
+            "current": info.current,
+            "latest": info.latest,
+            "update_available": info.update_available,
+        })),
+        Ok(Err(e)) => axum::Json(serde_json::json!({
+            "current": env!("CARGO_PKG_VERSION"),
+            "error": format!("Failed to check for updates: {}", e),
+        })),
+        Err(e) => axum::Json(serde_json::json!({
+            "current": env!("CARGO_PKG_VERSION"),
+            "error": format!("Update check task failed: {}", e),
+        })),
     }
+}
+
+async fn update_self_handler() -> Result<axum::Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    // Check first
+    let info = tokio::task::spawn_blocking(crate::updater::check_for_update)
+        .await
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Task failed: {}", e)))?
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Check failed: {}", e)))?;
+
+    if !info.update_available {
+        return Ok(axum::Json(serde_json::json!({
+            "status": "up_to_date",
+            "current": info.current,
+        })));
+    }
+
+    // Perform update (no progress bar for API)
+    let version = tokio::task::spawn_blocking(|| crate::updater::perform_update(false))
+        .await
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Task failed: {}", e)))?
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+
+    tracing::info!("Binary updated to v{}. Restart required.", version);
+
+    Ok(axum::Json(serde_json::json!({
+        "status": "updated",
+        "previous": info.current,
+        "updated_to": version,
+        "message": "Binary updated. Restart the server to use the new version.",
+    })))
 }
 
 async fn gpu_handler(

@@ -23,6 +23,10 @@ struct Cli {
     /// Backend URLs (format: name=url:priority)
     #[arg(short, long)]
     backend: Vec<String>,
+
+    /// Check for updates and install if available
+    #[arg(long)]
+    update: bool,
 }
 
 #[tokio::main]
@@ -35,6 +39,34 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    if cli.update {
+        println!("Checking for updates...");
+        match herd::updater::check_for_update() {
+            Ok(info) if info.update_available => {
+                println!("Update available: v{} → v{}", info.current, info.latest);
+                println!("Downloading and installing...");
+                match herd::updater::perform_update(true) {
+                    Ok(version) => {
+                        println!("Updated to v{}. Please restart herd.", version);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("Update failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(info) => {
+                println!("Already up to date (v{})", info.current);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Update check failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     let (config, config_path) = if let Some(config_path) = cli.config {
         let config = Config::from_file(&config_path)?;
@@ -60,6 +92,9 @@ async fn main() -> anyhow::Result<()> {
         config.server.port,
         config.backends.len()
     );
+
+    // Background update check (non-blocking, best-effort)
+    tokio::spawn(herd::updater::startup_update_check());
 
     server::run(config, config_path).await
 }

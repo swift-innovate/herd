@@ -28,6 +28,7 @@ async-trait = "0.1"
 chrono = "0.4"
 dirs = "5.0"
 uuid = { version = "1", features = ["v4"] }
+self_update = { version = "0.42", features = ["archive-zip", "archive-tar", "compression-flate2", "compression-zip-deflate"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

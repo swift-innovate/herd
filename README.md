@@ -23,6 +23,7 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Hot-reload config** — File watcher + `POST /admin/reload` (new in v0.3.0)
 - **Rate limiting** — Global token-bucket rate limiter
 - **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint
+- **Auto-update** — `herd --update` or `POST /admin/update` (new in v0.4.0)
 
 ### Observability 📊
 - **Prometheus metrics** — `/metrics` endpoint with request counters, backend gauges, and latency histogram
@@ -154,6 +155,7 @@ Request IDs are included in JSONL analytics logs for correlation across systems.
 | `PUT /admin/backends/:name` | Update backend config |
 | `DELETE /admin/backends/:name` | Remove backend |
 | `POST /admin/reload` | Hot-reload config file (when enabled, API key required) |
+| `POST /admin/update` | Self-update from GitHub Releases (API key required) |
 
 ## Analytics & Monitoring (v0.2.0)
 
@@ -209,6 +211,25 @@ curl http://localhost:40114/analytics?hours=1
   "timeline": [[1709395200, 45], [1709395260, 52], ...]
 }
 ```
+
+## Auto-Update
+
+Herd can update itself from GitHub Releases:
+
+```bash
+# CLI: check and install update
+herd --update
+
+# API: trigger update remotely (requires API key)
+curl -X POST -H "X-API-Key: your-key" http://localhost:40114/admin/update
+
+# Check without installing (no auth required)
+curl http://localhost:40114/update
+```
+
+On startup, Herd checks for updates in the background and logs a notification if a newer version is available.
+
+**Note:** After updating via `--update` or `/admin/update`, the server must be restarted to run the new version. The previous binary is kept as a backup for rollback.
 
 ## Model Homing
 
@@ -335,6 +356,7 @@ Herd will route based on:
 | Prometheus metrics | ✅ | ❌ |
 | Correlation IDs | ✅ | ❌ |
 | Log rotation | ✅ | ❌ |
+| Auto-update | ✅ | ❌ |
 | Language | Rust | Go |
 
 ## License

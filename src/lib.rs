@@ -8,5 +8,6 @@ pub mod api;
 pub mod cli;
 pub mod analytics;
 pub mod metrics;
+pub mod updater;
 
 pub use config::Config;
