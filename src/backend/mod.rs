@@ -1,7 +1,7 @@
-pub mod pool;
-pub mod health;
 pub mod discovery;
+pub mod health;
+pub mod pool;
 
-pub use pool::{BackendPool, BackendState, GpuMetrics};
-pub use health::HealthChecker;
 pub use discovery::ModelDiscovery;
+pub use health::HealthChecker;
+pub use pool::{BackendPool, BackendState, GpuMetrics};

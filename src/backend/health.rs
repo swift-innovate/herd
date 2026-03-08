@@ -34,7 +34,10 @@ impl HealthChecker {
         for name in backends {
             if let Some(state) = pool.get(&name).await {
                 if !state.healthy && state.last_check.elapsed() < pool.recovery_time() {
-                    tracing::trace!("Backend {} is unhealthy, skipping until recovery time elapses", name);
+                    tracing::trace!(
+                        "Backend {} is unhealthy, skipping until recovery time elapses",
+                        name
+                    );
                     continue;
                 }
                 let path = state.config.health_check_path.as_deref().unwrap_or("/");
@@ -42,11 +45,18 @@ impl HealthChecker {
                 match self.client.get(&url).send().await {
                     Ok(resp) => {
                         let expected = state.config.health_check_status.unwrap_or(200);
-                        if resp.status().as_u16() == expected || (expected == 200 && resp.status().is_success()) {
+                        if resp.status().as_u16() == expected
+                            || (expected == 200 && resp.status().is_success())
+                        {
                             pool.mark_healthy(&name).await;
                             tracing::trace!("Backend {} is healthy", name);
                         } else {
-                            warn!("Backend {} returned status {} (expected {})", name, resp.status(), expected);
+                            warn!(
+                                "Backend {} returned status {} (expected {})",
+                                name,
+                                resp.status(),
+                                expected
+                            );
                             pool.mark_unhealthy(&name).await;
                         }
                     }

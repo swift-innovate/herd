@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::{Router, RoutedBackend};
+use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -21,13 +21,16 @@ impl WeightedRoundRobinRouter {
 
 #[async_trait]
 impl Router for WeightedRoundRobinRouter {
-    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
+    async fn route(
+        &self,
+        _model: Option<&str>,
+        tags: Option<&[String]>,
+    ) -> anyhow::Result<RoutedBackend> {
         let backends = self.pool.backends.read().await;
         let healthy: Vec<_> = backends
             .iter()
             .filter(|b| {
-                b.healthy
-                    && tags.map_or(true, |t| t.iter().all(|tag| b.config.tags.contains(tag)))
+                b.healthy && tags.is_none_or(|t| t.iter().all(|tag| b.config.tags.contains(tag)))
             })
             .collect();
 
@@ -151,7 +154,11 @@ mod tests {
         // Mark "down" as unhealthy
         {
             let mut backends = pool.backends.write().await;
-            backends.iter_mut().find(|b| b.config.name == "down").unwrap().healthy = false;
+            backends
+                .iter_mut()
+                .find(|b| b.config.name == "down")
+                .unwrap()
+                .healthy = false;
         }
 
         let router = WeightedRoundRobinRouter::new(pool);

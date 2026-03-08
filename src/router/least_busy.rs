@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::{Router, RoutedBackend};
+use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
 
 #[derive(Clone)]
@@ -15,7 +15,11 @@ impl LeastBusyRouter {
 
 #[async_trait]
 impl Router for LeastBusyRouter {
-    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
+    async fn route(
+        &self,
+        _model: Option<&str>,
+        tags: Option<&[String]>,
+    ) -> anyhow::Result<RoutedBackend> {
         let backend = if let Some(tags) = tags {
             self.pool.get_least_busy_tagged(tags).await
         } else {
@@ -23,10 +27,7 @@ impl Router for LeastBusyRouter {
         }
         .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 
-        tracing::debug!(
-            "Routing to {} (least busy)",
-            backend.config.name
-        );
+        tracing::debug!("Routing to {} (least busy)", backend.config.name);
         Ok(RoutedBackend {
             name: backend.config.name.clone(),
             url: backend.config.url.clone(),

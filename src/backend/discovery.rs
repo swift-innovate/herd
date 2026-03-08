@@ -76,12 +76,12 @@ impl ModelDiscovery {
         for name in backends {
             if let Some(state) = pool.get(&name).await {
                 // Discover available models
-                if let Err(e) = self.discover_models(&pool, &state.config).await {
+                if let Err(e) = self.discover_models(pool, &state.config).await {
                     tracing::warn!("Failed to discover models for {}: {}", name, e);
                 }
 
                 // Discover currently loaded model
-                if let Err(e) = self.discover_running(&pool, &state.config).await {
+                if let Err(e) = self.discover_running(pool, &state.config).await {
                     tracing::trace!("No running model on {}: {}", name, e);
                 }
 
@@ -89,7 +89,9 @@ impl ModelDiscovery {
                 let gpu_url = if let Some(ref configured) = state.config.gpu_hot_url {
                     Some(configured.clone())
                 } else {
-                    let host = state.config.url
+                    let host = state
+                        .config
+                        .url
                         .trim_start_matches("http://")
                         .trim_start_matches("https://")
                         .split(':')
@@ -102,7 +104,7 @@ impl ModelDiscovery {
                     }
                 };
                 if let Some(ref gpu_url) = gpu_url {
-                    if let Err(e) = self.discover_gpu_metrics(&pool, &name, gpu_url).await {
+                    if let Err(e) = self.discover_gpu_metrics(pool, &name, gpu_url).await {
                         tracing::trace!("No gpu-hot on {}: {}", name, e);
                     }
                 }
@@ -127,12 +129,20 @@ impl ModelDiscovery {
                     if model_names.len() < before {
                         tracing::debug!(
                             "model_filter '{}' on {}: kept {}/{} models",
-                            filter, backend.name, model_names.len(), before
+                            filter,
+                            backend.name,
+                            model_names.len(),
+                            before
                         );
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Invalid model_filter '{}' on {}: {}", filter, backend.name, e);
+                    tracing::warn!(
+                        "Invalid model_filter '{}' on {}: {}",
+                        filter,
+                        backend.name,
+                        e
+                    );
                 }
             }
         }
