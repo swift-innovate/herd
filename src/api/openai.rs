@@ -42,7 +42,8 @@ pub async fn chat_completions(
     let mut headers = parts.headers.clone();
 
     // Get or generate correlation ID
-    let request_id = headers.get("x-request-id")
+    let request_id = headers
+        .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
@@ -103,11 +104,7 @@ pub async fn chat_completions(
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| "/v1/chat/completions".to_string());
 
-    let url = format!(
-        "{}{}",
-        backend.url.trim_end_matches('/'),
-        path_and_query
-    );
+    let url = format!("{}{}", backend.url.trim_end_matches('/'), path_and_query);
 
     // Build proxied request with header forwarding
     let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes())
@@ -150,11 +147,10 @@ pub async fn chat_completions(
                 path: "/v1/chat/completions".to_string(),
                 request_id: Some(request_id.clone()),
             };
-            state.metrics.record_request(
-                &log.backend,
-                &log.status,
-                log.duration_ms,
-            ).await;
+            state
+                .metrics
+                .record_request(&log.backend, &log.status, log.duration_ms)
+                .await;
             let _ = state.analytics.log_request(log).await;
 
             return Err(openai_error(
@@ -165,7 +161,11 @@ pub async fn chat_completions(
     };
 
     let duration = start.elapsed();
-    let status = if response.status().is_success() { "success" } else { "error" };
+    let status = if response.status().is_success() {
+        "success"
+    } else {
+        "error"
+    };
 
     let log = crate::analytics::RequestLog {
         timestamp: chrono::Utc::now().timestamp(),
@@ -176,11 +176,10 @@ pub async fn chat_completions(
         path: "/v1/chat/completions".to_string(),
         request_id: Some(request_id.clone()),
     };
-    state.metrics.record_request(
-        &log.backend,
-        &log.status,
-        log.duration_ms,
-    ).await;
+    state
+        .metrics
+        .record_request(&log.backend, &log.status, log.duration_ms)
+        .await;
 
     if let Err(e) = state.analytics.log_request(log).await {
         tracing::error!("Failed to log request: {}", e);
@@ -204,9 +203,12 @@ pub async fn chat_completions(
 
     // Stream body for SSE streaming support
     let body = axum::body::Body::from_stream(response.bytes_stream());
-    builder
-        .body(body)
-        .map_err(|_| openai_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build response"))
+    builder.body(body).map_err(|_| {
+        openai_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build response",
+        )
+    })
 }
 
 /// Returns an OpenAI-format error response.

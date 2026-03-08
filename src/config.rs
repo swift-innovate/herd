@@ -1,23 +1,23 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use std::fs;
-use anyhow::Result;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
-    
+
     #[serde(default)]
     pub routing: RoutingConfig,
-    
+
     #[serde(default)]
     pub backends: Vec<Backend>,
-    
+
     #[serde(default)]
     pub circuit_breaker: CircuitBreakerConfig,
-    
+
     #[serde(default)]
     pub observability: ObservabilityConfig,
 }
@@ -49,20 +49,24 @@ impl Default for ServerConfig {
     }
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 40114 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    40114
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingConfig {
     #[serde(default = "default_strategy")]
     pub strategy: RoutingStrategy,
-    
+
     #[serde(default = "default_timeout")]
     pub timeout: String,
-    
+
     #[serde(default = "default_retry_count")]
     pub retry_count: u32,
-    
+
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout_minutes: u64,
 }
@@ -82,10 +86,10 @@ impl Default for RoutingConfig {
 pub enum RoutingStrategy {
     #[serde(rename = "priority")]
     Priority,
-    
+
     #[serde(rename = "model_aware")]
     ModelAware,
-    
+
     #[serde(rename = "least_busy")]
     LeastBusy,
 
@@ -93,23 +97,31 @@ pub enum RoutingStrategy {
     WeightedRoundRobin,
 }
 
-fn default_strategy() -> RoutingStrategy { RoutingStrategy::ModelAware }
-fn default_timeout() -> String { "120s".to_string() }
-fn default_retry_count() -> u32 { 2 }
-fn default_idle_timeout() -> u64 { 30 }
+fn default_strategy() -> RoutingStrategy {
+    RoutingStrategy::ModelAware
+}
+fn default_timeout() -> String {
+    "120s".to_string()
+}
+fn default_retry_count() -> u32 {
+    2
+}
+fn default_idle_timeout() -> u64 {
+    30
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Backend {
     pub name: String,
     pub url: String,
     pub priority: u32,
-    
+
     #[serde(default)]
     pub default_model: Option<String>,
-    
+
     #[serde(default)]
     pub gpu_hot_url: Option<String>,
-    
+
     #[serde(default)]
     pub model_filter: Option<String>,
 
@@ -143,10 +155,10 @@ impl Default for Backend {
 pub struct CircuitBreakerConfig {
     #[serde(default = "default_failure_threshold")]
     pub failure_threshold: u32,
-    
+
     #[serde(default = "default_timeout")]
     pub timeout: String,
-    
+
     #[serde(default = "default_recovery_time")]
     pub recovery_time: String,
 }
@@ -161,8 +173,12 @@ impl Default for CircuitBreakerConfig {
     }
 }
 
-fn default_failure_threshold() -> u32 { 3 }
-fn default_recovery_time() -> String { "60s".to_string() }
+fn default_failure_threshold() -> u32 {
+    3
+}
+fn default_recovery_time() -> String {
+    "60s".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservabilityConfig {
@@ -201,10 +217,18 @@ impl Default for ObservabilityConfig {
     }
 }
 
-fn default_true() -> bool { true }
-fn default_log_retention_days() -> u64 { 7 }
-fn default_log_max_size_mb() -> u64 { 100 }
-fn default_log_max_files() -> u32 { 5 }
+fn default_true() -> bool {
+    true
+}
+fn default_log_retention_days() -> u64 {
+    7
+}
+fn default_log_max_size_mb() -> u64 {
+    100
+}
+fn default_log_max_files() -> u32 {
+    5
+}
 
 impl Config {
     pub fn from_file(path: &Path) -> Result<Self> {
@@ -212,21 +236,9 @@ impl Config {
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
     }
-    
+
     pub fn to_yaml(&self) -> Result<String> {
         Ok(serde_yaml::to_string(self)?)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            routing: RoutingConfig::default(),
-            backends: Vec::new(),
-            circuit_breaker: CircuitBreakerConfig::default(),
-            observability: ObservabilityConfig::default(),
-        }
     }
 }
 
@@ -235,7 +247,9 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     if trimmed.is_empty() {
         anyhow::bail!("duration is empty");
     }
-    let split_at = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(trimmed.len());
+    let split_at = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(trimmed.len());
     let (number, suffix) = trimmed.split_at(split_at);
     if number.is_empty() {
         anyhow::bail!("duration has no numeric component: {}", input);

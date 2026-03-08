@@ -1,5 +1,5 @@
-use crate::server::AppState;
 use crate::config::Backend;
+use crate::server::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -21,7 +21,9 @@ pub struct AddBackendRequest {
     pub tags: Vec<String>,
 }
 
-fn default_priority() -> u32 { 50 }
+fn default_priority() -> u32 {
+    50
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateBackendRequest {
@@ -81,18 +83,16 @@ fn backend_to_response(b: &crate::backend::BackendState) -> BackendResponse {
     }
 }
 
-pub async fn list_backends(
-    State(state): State<AppState>,
-) -> Json<Vec<BackendResponse>> {
+pub async fn list_backends(State(state): State<AppState>) -> Json<Vec<BackendResponse>> {
     let backends = state.pool.all().await;
     let mut response = Vec::new();
-    
+
     for name in backends {
         if let Some(b) = state.pool.get(&name).await {
             response.push(backend_to_response(&b));
         }
     }
-    
+
     Json(response)
 }
 
@@ -110,9 +110,12 @@ pub async fn add_backend(
 ) -> Result<Json<BackendResponse>, (StatusCode, String)> {
     // Check if already exists
     if state.pool.get(&req.name).await.is_some() {
-        return Err((StatusCode::CONFLICT, format!("Backend '{}' already exists", req.name)));
+        return Err((
+            StatusCode::CONFLICT,
+            format!("Backend '{}' already exists", req.name),
+        ));
     }
-    
+
     let backend = Backend {
         name: req.name.clone(),
         url: req.url,
@@ -124,16 +127,19 @@ pub async fn add_backend(
         health_check_status: None,
         tags: req.tags,
     };
-    
+
     state.pool.add(backend).await;
-    
+
     // Brief pause for health check to pick it up
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    
+
     let b = state.pool.get(&req.name).await.ok_or_else(|| {
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to add backend".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to add backend".to_string(),
+        )
     })?;
-    
+
     tracing::info!("Added backend: {}", req.name);
     Ok(Json(backend_to_response(&b)))
 }
@@ -144,9 +150,12 @@ pub async fn update_backend(
     Json(req): Json<UpdateBackendRequest>,
 ) -> Result<Json<BackendResponse>, (StatusCode, String)> {
     let mut backend = state.pool.get(&name).await.ok_or_else(|| {
-        (StatusCode::NOT_FOUND, format!("Backend '{}' not found", name))
+        (
+            StatusCode::NOT_FOUND,
+            format!("Backend '{}' not found", name),
+        )
     })?;
-    
+
     if let Some(url) = req.url {
         backend.config.url = url;
     }
@@ -162,9 +171,9 @@ pub async fn update_backend(
     if let Some(tags) = req.tags {
         backend.config.tags = tags;
     }
-    
+
     state.pool.update(backend.clone()).await;
-    
+
     tracing::info!("Updated backend: {}", name);
     Ok(Json(backend_to_response(&backend)))
 }

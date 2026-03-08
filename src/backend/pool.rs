@@ -1,8 +1,8 @@
 use crate::config::Backend;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct BackendState {
@@ -71,10 +71,7 @@ impl BackendPool {
 
     pub async fn get(&self, name: &str) -> Option<BackendState> {
         let backends = self.backends.read().await;
-        backends
-            .iter()
-            .find(|b| b.config.name == name)
-            .cloned()
+        backends.iter().find(|b| b.config.name == name).cloned()
     }
 
     pub async fn get_healthy(&self, name: &str) -> Option<BackendState> {
@@ -111,7 +108,9 @@ impl BackendPool {
             .min_by(|a, b| {
                 let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
                 let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                a_busy.partial_cmp(&b_busy).unwrap_or(std::cmp::Ordering::Equal)
+                a_busy
+                    .partial_cmp(&b_busy)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .cloned()
     }
@@ -230,7 +229,10 @@ impl BackendPool {
 
     pub async fn update(&self, state: BackendState) {
         let mut backends = self.backends.write().await;
-        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == state.config.name) {
+        if let Some(backend) = backends
+            .iter_mut()
+            .find(|b| b.config.name == state.config.name)
+        {
             *backend = state;
         }
     }
@@ -283,11 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn mark_healthy_unhealthy() {
-        let pool = BackendPool::new(
-            vec![make_backend("gpu1", 100)],
-            3,
-            Duration::from_secs(60),
-        );
+        let pool = BackendPool::new(vec![make_backend("gpu1", 100)], 3, Duration::from_secs(60));
 
         // Initially healthy with failure_count 0
         let state = pool.get("gpu1").await.unwrap();
@@ -309,11 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn circuit_breaker_threshold() {
-        let pool = BackendPool::new(
-            vec![make_backend("gpu1", 100)],
-            3,
-            Duration::from_secs(60),
-        );
+        let pool = BackendPool::new(vec![make_backend("gpu1", 100)], 3, Duration::from_secs(60));
 
         // Below threshold: still healthy
         pool.mark_unhealthy("gpu1").await;

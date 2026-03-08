@@ -63,12 +63,15 @@ impl Analytics {
 
         let file = std::fs::File::open(&self.log_path)?;
         let reader = BufReader::new(file);
-        
+
         let mut total_requests = 0;
-        let mut model_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut backend_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut model_counts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut backend_counts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
         let _timeline: Vec<(i64, u64)> = Vec::new(); // (timestamp_minute, count)
-        let mut minute_buckets: std::collections::HashMap<i64, u64> = std::collections::HashMap::new();
+        let mut minute_buckets: std::collections::HashMap<i64, u64> =
+            std::collections::HashMap::new();
         let mut durations: Vec<u64> = Vec::new();
 
         for line in reader.lines() {
@@ -76,19 +79,19 @@ impl Analytics {
             if let Ok(log) = serde_json::from_str::<RequestLog>(&line) {
                 if log.timestamp >= cutoff {
                     total_requests += 1;
-                    
+
                     // Count by model
                     if let Some(model) = &log.model {
                         *model_counts.entry(model.clone()).or_insert(0) += 1;
                     }
-                    
+
                     // Count by backend
                     *backend_counts.entry(log.backend.clone()).or_insert(0) += 1;
-                    
+
                     // Timeline (group by minute)
                     let minute = (log.timestamp / 60) * 60;
                     *minute_buckets.entry(minute).or_insert(0) += 1;
-                    
+
                     // Durations for percentiles
                     if log.status == "success" {
                         durations.push(log.duration_ms);
@@ -100,12 +103,24 @@ impl Analytics {
         // Convert minute buckets to sorted timeline
         let mut timeline_vec: Vec<(i64, u64)> = minute_buckets.into_iter().collect();
         timeline_vec.sort_by_key(|(ts, _)| *ts);
-        
+
         // Calculate percentiles
         durations.sort();
-        let p50 = if durations.is_empty() { 0 } else { durations[durations.len() / 2] };
-        let p95 = if durations.is_empty() { 0 } else { durations[(durations.len() * 95) / 100] };
-        let p99 = if durations.is_empty() { 0 } else { durations[(durations.len() * 99) / 100] };
+        let p50 = if durations.is_empty() {
+            0
+        } else {
+            durations[durations.len() / 2]
+        };
+        let p95 = if durations.is_empty() {
+            0
+        } else {
+            durations[(durations.len() * 95) / 100]
+        };
+        let p99 = if durations.is_empty() {
+            0
+        } else {
+            durations[(durations.len() * 99) / 100]
+        };
 
         Ok(AnalyticsStats {
             total_requests,
@@ -151,7 +166,9 @@ impl Analytics {
         }
 
         // Delete the oldest if it exceeds max_files
-        let oldest = self.log_path.with_extension(format!("jsonl.{}", max_files + 1));
+        let oldest = self
+            .log_path
+            .with_extension(format!("jsonl.{}", max_files + 1));
         if oldest.exists() {
             let _ = std::fs::remove_file(&oldest);
         }
@@ -176,14 +193,14 @@ impl Analytics {
 
         let file = std::fs::File::open(&self.log_path)?;
         let reader = BufReader::new(file);
-        
+
         let temp_path = self.log_path.with_extension("tmp");
         let mut temp_file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&temp_path)?;
-        
+
         let mut _kept = 0;
         let mut removed = 0;
 

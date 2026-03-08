@@ -16,10 +16,16 @@ pub struct Metrics {
 }
 
 pub struct LatencyHistogram {
-    bucket_bounds: Vec<u64>,    // upper bounds in ms
+    bucket_bounds: Vec<u64>,       // upper bounds in ms
     bucket_counts: Vec<AtomicU64>, // count of observations <= bound
-    sum: AtomicU64,             // total sum of observations in ms
-    count: AtomicU64,           // total count of observations
+    sum: AtomicU64,                // total sum of observations in ms
+    count: AtomicU64,              // total count of observations
+}
+
+impl Default for LatencyHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LatencyHistogram {
@@ -49,7 +55,9 @@ impl LatencyHistogram {
 
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("# HELP herd_request_duration_ms Request duration histogram in milliseconds\n");
+        out.push_str(
+            "# HELP herd_request_duration_ms Request duration histogram in milliseconds\n",
+        );
         out.push_str("# TYPE herd_request_duration_ms histogram\n");
         // Buckets are cumulative in Prometheus
         let mut cumulative = 0u64;
@@ -71,6 +79,12 @@ impl LatencyHistogram {
         ));
         out.push_str(&format!("herd_request_duration_ms_count {}\n", total));
         out
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -168,8 +182,8 @@ mod tests {
     #[test]
     fn histogram_buckets_cumulative() {
         let h = LatencyHistogram::new();
-        h.observe(5);   // fits in 10ms bucket
-        h.observe(75);  // fits in 100ms bucket
+        h.observe(5); // fits in 10ms bucket
+        h.observe(75); // fits in 100ms bucket
         h.observe(300); // fits in 500ms bucket
 
         let rendered = h.render();

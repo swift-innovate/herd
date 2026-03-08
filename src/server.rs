@@ -2,16 +2,16 @@ use crate::analytics::{Analytics, RequestLog};
 use crate::api::{admin, openai};
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
 use crate::config::{parse_duration, Config};
-use crate::router::{create_router, Router};
 use crate::model_homing::ModelHoming;
+use crate::router::{create_router, Router};
 use anyhow::Result;
+use chrono::Timelike;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use chrono::Timelike;
 
 const DEFAULT_ROUTING_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_CIRCUIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -46,7 +46,9 @@ impl AppState {
     }
 
     pub async fn reload_config(&self) -> anyhow::Result<String> {
-        let path = self.config_path.as_ref()
+        let path = self
+            .config_path
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No config file path (started with CLI args)"))?;
 
         let new_config = Config::from_file(path)?;
@@ -77,17 +79,16 @@ impl AppState {
         }
 
         // Swap router (new router shares the same pool data)
-        let new_router = create_router(
-            new_config.routing.strategy.clone(),
-            (*self.pool).clone(),
-        );
+        let new_router = create_router(new_config.routing.strategy.clone(), (*self.pool).clone());
         *self.router.write().await = new_router;
 
         // Update timeout and retry count
-        let new_timeout = parse_duration(&new_config.routing.timeout)
-            .unwrap_or(DEFAULT_ROUTING_TIMEOUT);
-        self.routing_timeout_ms.store(new_timeout.as_millis() as u64, Ordering::Relaxed);
-        self.routing_retry_count.store(new_config.routing.retry_count, Ordering::Relaxed);
+        let new_timeout =
+            parse_duration(&new_config.routing.timeout).unwrap_or(DEFAULT_ROUTING_TIMEOUT);
+        self.routing_timeout_ms
+            .store(new_timeout.as_millis() as u64, Ordering::Relaxed);
+        self.routing_retry_count
+            .store(new_config.routing.retry_count, Ordering::Relaxed);
 
         let msg = format!(
             "Reloaded: {} backends, strategy={:?}",
@@ -101,18 +102,25 @@ impl AppState {
 
 impl Server {
     pub fn new(config: Config, config_path: Option<PathBuf>) -> Self {
-        Self { config, config_path }
+        Self {
+            config,
+            config_path,
+        }
     }
 
     pub async fn run(self) -> Result<()> {
         let addr = format!("{}:{}", self.config.server.host, self.config.server.port);
-        info!("Starting Herd on {} with {} backends", addr, self.config.backends.len());
+        info!(
+            "Starting Herd on {} with {} backends",
+            addr,
+            self.config.backends.len()
+        );
 
         // Parse durations from config
-        let routing_timeout = parse_duration(&self.config.routing.timeout)
-            .unwrap_or(DEFAULT_ROUTING_TIMEOUT);
-        let circuit_timeout = parse_duration(&self.config.circuit_breaker.timeout)
-            .unwrap_or(DEFAULT_CIRCUIT_TIMEOUT);
+        let routing_timeout =
+            parse_duration(&self.config.routing.timeout).unwrap_or(DEFAULT_ROUTING_TIMEOUT);
+        let circuit_timeout =
+            parse_duration(&self.config.circuit_breaker.timeout).unwrap_or(DEFAULT_CIRCUIT_TIMEOUT);
         let recovery_time = parse_duration(&self.config.circuit_breaker.recovery_time)
             .unwrap_or(DEFAULT_RECOVERY_TIME);
 
@@ -156,7 +164,10 @@ impl Server {
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
 
                 // Check rotation every hour
-                match analytics_clone.rotate_if_needed(max_size_mb, max_files).await {
+                match analytics_clone
+                    .rotate_if_needed(max_size_mb, max_files)
+                    .await
+                {
                     Ok(true) => tracing::info!("Log file rotated"),
                     Ok(false) => {}
                     Err(e) => tracing::error!("Log rotation failed: {}", e),
@@ -170,7 +181,10 @@ impl Server {
                     if let Err(e) = analytics_clone.cleanup_old(retention_days).await {
                         tracing::error!("Failed to cleanup old analytics: {}", e);
                     } else {
-                        tracing::info!("Cleaned up analytics logs older than {} days", retention_days);
+                        tracing::info!(
+                            "Cleaned up analytics logs older than {} days",
+                            retention_days
+                        );
                     }
                 }
             }
@@ -181,9 +195,11 @@ impl Server {
 
         // Wrap in Arc
         let pool = Arc::new(pool);
-        let client = Arc::new(reqwest::Client::builder()
-            .timeout(circuit_timeout)
-            .build()?);
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .timeout(circuit_timeout)
+                .build()?,
+        );
 
         let state = AppState {
             pool: Arc::clone(&pool),
@@ -207,7 +223,10 @@ impl Server {
             .route("/dashboard", axum::routing::get(dashboard_handler))
             // OpenAI-compatible API
             .route("/v1/models", axum::routing::get(openai::list_models))
-            .route("/v1/chat/completions", axum::routing::post(openai::chat_completions))
+            .route(
+                "/v1/chat/completions",
+                axum::routing::post(openai::chat_completions),
+            )
             // Update check
             .route("/update", axum::routing::get(update_check_handler))
             // GPU handler
@@ -223,10 +242,16 @@ impl Server {
         // Conditionally mount admin API (requires auth)
         if self.config.observability.admin_api {
             let admin_routes = axum::Router::new()
-                .route("/", axum::routing::get(admin::list_backends).post(admin::add_backend))
-                .route("/:name", axum::routing::get(admin::get_backend)
-                    .put(admin::update_backend)
-                    .delete(admin::remove_backend))
+                .route(
+                    "/",
+                    axum::routing::get(admin::list_backends).post(admin::add_backend),
+                )
+                .route(
+                    "/:name",
+                    axum::routing::get(admin::get_backend)
+                        .put(admin::update_backend)
+                        .delete(admin::remove_backend),
+                )
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     require_api_key,
@@ -240,7 +265,9 @@ impl Server {
                     require_api_key,
                 ));
 
-            app = app.nest("/admin/backends", admin_routes).merge(reload_route);
+            app = app
+                .nest("/admin/backends", admin_routes)
+                .merge(reload_route);
         }
 
         // Clone state for file watcher before it's consumed by with_state()
@@ -250,23 +277,23 @@ impl Server {
         let app = if self.config.server.rate_limit > 0 {
             let limiter = Arc::new(RateLimiter::new(self.config.server.rate_limit));
             app.fallback(proxy_handler)
-                .layer(tower::ServiceBuilder::new()
-                    .layer(TraceLayer::new_for_http()))
-                .layer(axum::middleware::from_fn(move |req, next: axum::middleware::Next| {
-                    let limiter = Arc::clone(&limiter);
-                    async move {
-                        if limiter.try_acquire() {
-                            Ok(next.run(req).await)
-                        } else {
-                            Err(axum::http::StatusCode::TOO_MANY_REQUESTS)
+                .layer(tower::ServiceBuilder::new().layer(TraceLayer::new_for_http()))
+                .layer(axum::middleware::from_fn(
+                    move |req, next: axum::middleware::Next| {
+                        let limiter = Arc::clone(&limiter);
+                        async move {
+                            if limiter.try_acquire() {
+                                Ok(next.run(req).await)
+                            } else {
+                                Err(axum::http::StatusCode::TOO_MANY_REQUESTS)
+                            }
                         }
-                    }
-                }))
+                    },
+                ))
                 .with_state(state)
         } else {
             app.fallback(proxy_handler)
-                .layer(tower::ServiceBuilder::new()
-                    .layer(TraceLayer::new_for_http()))
+                .layer(tower::ServiceBuilder::new().layer(TraceLayer::new_for_http()))
                 .with_state(state)
         };
 
@@ -285,7 +312,7 @@ impl Server {
                     ticker.tick().await;
                     if let Ok(meta) = std::fs::metadata(&watch_path) {
                         if let Ok(mtime) = meta.modified() {
-                            if last_mtime.map_or(false, |prev| mtime > prev) {
+                            if last_mtime.is_some_and(|prev| mtime > prev) {
                                 last_mtime = Some(mtime);
                                 tracing::info!("Config file changed, reloading...");
                                 if let Err(e) = watch_state.reload_config().await {
@@ -338,12 +365,16 @@ impl RateLimiter {
             if current == 0 {
                 return false;
             }
-            if self.tokens.compare_exchange_weak(
-                current,
-                current - 1,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            ).is_ok() {
+            if self
+                .tokens
+                .compare_exchange_weak(
+                    current,
+                    current - 1,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+                .is_ok()
+            {
                 return true;
             }
         }
@@ -391,8 +422,7 @@ pub async fn require_api_key(
         None => return Ok(next.run(req).await), // no key configured = allow
     };
 
-    let provided = extract_api_key(&req)
-        .ok_or(axum::http::StatusCode::UNAUTHORIZED)?;
+    let provided = extract_api_key(&req).ok_or(axum::http::StatusCode::UNAUTHORIZED)?;
 
     if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
         return Err(axum::http::StatusCode::UNAUTHORIZED);
@@ -451,7 +481,8 @@ async fn proxy_handler(
     let mut headers = request.headers().clone();
 
     // Get or generate correlation ID
-    let request_id = headers.get("x-request-id")
+    let request_id = headers
+        .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
@@ -469,8 +500,10 @@ async fn proxy_handler(
         .map_err(|_| axum::http::StatusCode::PAYLOAD_TOO_LARGE)?;
 
     // Try to extract model from body for routing and logging.
-    if path.contains("/api/generate") || path.contains("/api/chat")
-        || path.contains("/v1/chat/completions") || path.contains("/v1/completions")
+    if path.contains("/api/generate")
+        || path.contains("/api/chat")
+        || path.contains("/v1/chat/completions")
+        || path.contains("/v1/completions")
     {
         if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             if let Some(model) = body_json.get("model").and_then(|m| m.as_str()) {
@@ -533,7 +566,11 @@ async fn proxy_handler(
     }
 
     let duration = start.elapsed();
-    let status = if response.is_some() { "success" } else { "error" };
+    let status = if response.is_some() {
+        "success"
+    } else {
+        "error"
+    };
 
     // Log request
     let log = RequestLog {
@@ -546,11 +583,10 @@ async fn proxy_handler(
         request_id: Some(request_id.clone()),
     };
 
-    state.metrics.record_request(
-        &log.backend,
-        &log.status,
-        log.duration_ms,
-    ).await;
+    state
+        .metrics
+        .record_request(&log.backend, &log.status, log.duration_ms)
+        .await;
 
     if let Err(e) = state.analytics.log_request(log).await {
         tracing::error!("Failed to log request: {}", e);
@@ -647,9 +683,7 @@ async fn status_handler(
     }))
 }
 
-async fn metrics_handler(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> String {
+async fn metrics_handler(axum::extract::State(state): axum::extract::State<AppState>) -> String {
     let healthy = state.pool.all_healthy().await.len();
     let total = state.pool.all().await.len();
 
@@ -672,9 +706,7 @@ herd_backends_healthy {}
         if let Some(backend) = state.pool.get(&name).await {
             let labels = format!(
                 r#"name="{}",priority="{}",healthy="{}""#,
-                backend.config.name,
-                backend.config.priority,
-                backend.healthy
+                backend.config.name, backend.config.priority, backend.healthy
             );
             metrics.push_str(&format!("herd_backend_info{{{}}} 1\n", labels));
 
@@ -685,10 +717,14 @@ herd_backend_gpu_memory_used{{name="{}"}} {}
 herd_backend_gpu_memory_total{{name="{}"}} {}
 herd_backend_gpu_temperature{{name="{}"}} {}
 "#,
-                    backend.config.name, gpu.utilization,
-                    backend.config.name, gpu.memory_used,
-                    backend.config.name, gpu.memory_total,
-                    backend.config.name, gpu.temperature
+                    backend.config.name,
+                    gpu.utilization,
+                    backend.config.name,
+                    gpu.memory_used,
+                    backend.config.name,
+                    gpu.memory_total,
+                    backend.config.name,
+                    gpu.temperature
                 ));
             }
         }
@@ -705,7 +741,8 @@ async fn analytics_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::Json<serde_json::Value> {
-    let hours = params.get("hours")
+    let hours = params
+        .get("hours")
         .and_then(|h| h.parse::<i64>().ok())
         .unwrap_or(24)
         .clamp(1, 168); // Cap at 7 days
@@ -714,11 +751,12 @@ async fn analytics_handler(
 
     match state.analytics.get_stats(seconds).await {
         Ok(stats) => axum::Json(
-            serde_json::to_value(&stats).unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"}))
+            serde_json::to_value(&stats)
+                .unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"})),
         ),
         Err(e) => axum::Json(serde_json::json!({
             "error": format!("Failed to get analytics: {}", e)
-        }))
+        })),
     }
 }
 
@@ -755,12 +793,23 @@ async fn update_check_handler() -> axum::Json<serde_json::Value> {
     }
 }
 
-async fn update_self_handler() -> Result<axum::Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+async fn update_self_handler(
+) -> Result<axum::Json<serde_json::Value>, (axum::http::StatusCode, String)> {
     // Check first
     let info = tokio::task::spawn_blocking(crate::updater::check_for_update)
         .await
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Task failed: {}", e)))?
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Check failed: {}", e)))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {}", e),
+            )
+        })?
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Check failed: {}", e),
+            )
+        })?;
 
     if !info.update_available {
         return Ok(axum::Json(serde_json::json!({
@@ -772,8 +821,18 @@ async fn update_self_handler() -> Result<axum::Json<serde_json::Value>, (axum::h
     // Perform update (no progress bar for API)
     let version = tokio::task::spawn_blocking(|| crate::updater::perform_update(false))
         .await
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Task failed: {}", e)))?
-        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {}", e),
+            )
+        })?
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Update failed: {}", e),
+            )
+        })?;
 
     tracing::info!("Binary updated to v{}. Restart required.", version);
 
@@ -797,7 +856,9 @@ async fn gpu_handler(
                 let base = base.trim_end_matches('/');
                 format!("{}/api/gpu-data", base)
             } else {
-                let host = backend.config.url
+                let host = backend
+                    .config
+                    .url
                     .trim_start_matches("http://")
                     .trim_start_matches("https://")
                     .split(':')

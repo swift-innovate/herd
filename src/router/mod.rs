@@ -1,6 +1,6 @@
-pub mod priority;
-pub mod model_aware;
 pub mod least_busy;
+pub mod model_aware;
+pub mod priority;
 pub mod weighted_round_robin;
 
 use crate::backend::BackendPool;
@@ -42,8 +42,12 @@ impl Router for RouterEnum {
 pub fn create_router(strategy: RoutingStrategy, pool: BackendPool) -> RouterEnum {
     match strategy {
         RoutingStrategy::Priority => RouterEnum::Priority(priority::PriorityRouter::new(pool)),
-        RoutingStrategy::ModelAware => RouterEnum::ModelAware(model_aware::ModelAwareRouter::new(pool)),
+        RoutingStrategy::ModelAware => {
+            RouterEnum::ModelAware(model_aware::ModelAwareRouter::new(pool))
+        }
         RoutingStrategy::LeastBusy => RouterEnum::LeastBusy(least_busy::LeastBusyRouter::new(pool)),
-        RoutingStrategy::WeightedRoundRobin => RouterEnum::WeightedRoundRobin(weighted_round_robin::WeightedRoundRobinRouter::new(pool)),
+        RoutingStrategy::WeightedRoundRobin => RouterEnum::WeightedRoundRobin(
+            weighted_round_robin::WeightedRoundRobinRouter::new(pool),
+        ),
     }
 }

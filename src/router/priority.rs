@@ -1,5 +1,5 @@
 use crate::backend::BackendPool;
-use crate::router::{Router, RoutedBackend};
+use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
 
 #[derive(Clone)]
@@ -15,7 +15,11 @@ impl PriorityRouter {
 
 #[async_trait]
 impl Router for PriorityRouter {
-    async fn route(&self, _model: Option<&str>, tags: Option<&[String]>) -> anyhow::Result<RoutedBackend> {
+    async fn route(
+        &self,
+        _model: Option<&str>,
+        tags: Option<&[String]>,
+    ) -> anyhow::Result<RoutedBackend> {
         let backend = if let Some(tags) = tags {
             self.pool.get_by_priority_tagged(tags).await
         } else {
@@ -77,23 +81,17 @@ mod tests {
 
     #[tokio::test]
     async fn error_when_no_healthy() {
-        let pool = BackendPool::new(
-            vec![make_backend("only", 100)],
-            1,
-            Duration::from_secs(60),
-        );
+        let pool = BackendPool::new(vec![make_backend("only", 100)], 1, Duration::from_secs(60));
 
         pool.mark_unhealthy("only").await;
 
         let router = PriorityRouter::new(pool);
         let result = router.route(None, None).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No healthy backends")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No healthy backends"));
     }
 
     #[tokio::test]

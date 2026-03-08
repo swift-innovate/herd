@@ -47,7 +47,7 @@ impl ModelHoming {
 
     async fn check_and_home(&self, pool: &BackendPool) {
         let backends = pool.all().await;
-        
+
         for name in backends {
             if let Some(backend) = pool.get(&name).await {
                 // Skip if no default model configured
@@ -73,9 +73,17 @@ impl ModelHoming {
                     Some(m) => m,
                     None => {
                         // No model loaded, load default
-                        info!("Loading default model {} on {} (no model loaded)", default_model, name);
+                        info!(
+                            "Loading default model {} on {} (no model loaded)",
+                            default_model, name
+                        );
                         if let Err(e) = self.warm_model(&backend.config, default_model).await {
-                            tracing::warn!("Failed to warm model {} on {}: {}", default_model, name, e);
+                            tracing::warn!(
+                                "Failed to warm model {} on {}: {}",
+                                default_model,
+                                name,
+                                e
+                            );
                         }
                         continue;
                     }
@@ -85,18 +93,18 @@ impl ModelHoming {
                 if current != default_model {
                     info!(
                         "Homing {} from {} to {} (idle for {:?})",
-                        name,
-                        current,
-                        default_model,
-                        idle_time
+                        name, current, default_model, idle_time
                     );
-                    
+
                     // Load the default model
                     if let Err(e) = self.warm_model(&backend.config, default_model).await {
                         tracing::warn!("Failed to home {} to {}: {}", name, default_model, e);
                     } else {
                         // Unload the borrowed model
-                        if let Err(e) = self.unload_other_models(&backend.config, default_model).await {
+                        if let Err(e) = self
+                            .unload_other_models(&backend.config, default_model)
+                            .await
+                        {
                             tracing::trace!("Could not unload other models: {}", e);
                         }
                     }
@@ -114,11 +122,7 @@ impl ModelHoming {
             "keep_alive": "5m"
         });
 
-        let resp = self.client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
 
         if !resp.status().is_success() {
             anyhow::bail!("Failed to warm model: {}", resp.status());
@@ -135,8 +139,12 @@ impl ModelHoming {
         let running: OllamaRunning = resp.json().await?;
 
         for model in running.models {
-            let model_name = if model.model.is_empty() { &model.name } else { &model.model };
-            
+            let model_name = if model.model.is_empty() {
+                &model.name
+            } else {
+                &model.model
+            };
+
             if model_name != keep_model {
                 // Unload this model
                 let unload_url = format!("{}/api/generate", backend.url);
