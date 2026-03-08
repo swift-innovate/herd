@@ -14,6 +14,8 @@ pub struct RequestLog {
     pub duration_ms: u64,
     pub status: String, // "success" | "error"
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 pub struct Analytics {
@@ -116,6 +118,58 @@ impl Analytics {
         })
     }
 
+    /// Rotates the log file if it exceeds max_size_mb.
+    /// Keeps up to max_files rotated files (.1, .2, etc.)
+    pub async fn rotate_if_needed(&self, max_size_mb: u64, max_files: u32) -> Result<bool> {
+        if max_size_mb == 0 {
+            return Ok(false); // rotation disabled
+        }
+
+        let _guard = self.file_lock.lock().await;
+
+        let metadata = match std::fs::metadata(&self.log_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(false),
+        };
+
+        let size_mb = metadata.len() / (1024 * 1024);
+        if size_mb < max_size_mb {
+            return Ok(false); // not yet at limit
+        }
+
+        // Shift existing rotated files: .4 → .5 (deleted if > max_files), .3 → .4, .2 → .3, .1 → .2
+        for i in (1..max_files).rev() {
+            let from = self.log_path.with_extension(format!("jsonl.{}", i));
+            let to = self.log_path.with_extension(format!("jsonl.{}", i + 1));
+            if from.exists() {
+                if i + 1 > max_files {
+                    let _ = std::fs::remove_file(&from);
+                } else {
+                    let _ = std::fs::rename(&from, &to);
+                }
+            }
+        }
+
+        // Delete the oldest if it exceeds max_files
+        let oldest = self.log_path.with_extension(format!("jsonl.{}", max_files + 1));
+        if oldest.exists() {
+            let _ = std::fs::remove_file(&oldest);
+        }
+
+        // Current → .1
+        let rotated = self.log_path.with_extension("jsonl.1");
+        std::fs::rename(&self.log_path, &rotated)?;
+
+        // Create fresh empty log file
+        let _file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)?;
+
+        tracing::info!("Rotated log file (was {}MB)", size_mb);
+        Ok(true)
+    }
+
     pub async fn cleanup_old(&self, days: i64) -> Result<usize> {
         let _guard = self.file_lock.lock().await;
         let cutoff = chrono::Utc::now().timestamp() - (days * 86400);
@@ -161,4 +215,69 @@ pub struct AnalyticsStats {
     pub latency_p50: u64,
     pub latency_p95: u64,
     pub latency_p99: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_log_with_request_id_serializes() {
+        let log = RequestLog {
+            timestamp: 1000,
+            model: Some("test".into()),
+            backend: "b1".into(),
+            duration_ms: 100,
+            status: "success".into(),
+            path: "/api/generate".into(),
+            request_id: Some("abc-123".into()),
+        };
+        let json = serde_json::to_string(&log).unwrap();
+        assert!(json.contains("abc-123"));
+    }
+
+    #[test]
+    fn request_log_without_request_id_omits_field() {
+        let log = RequestLog {
+            timestamp: 1000,
+            model: None,
+            backend: "b1".into(),
+            duration_ms: 100,
+            status: "success".into(),
+            path: "/test".into(),
+            request_id: None,
+        };
+        let json = serde_json::to_string(&log).unwrap();
+        assert!(!json.contains("request_id"));
+    }
+
+    #[test]
+    fn request_log_deserializes_without_request_id() {
+        // Old logs without request_id field should still deserialize
+        let json = r#"{"timestamp":1000,"model":null,"backend":"b1","duration_ms":100,"status":"success","path":"/test"}"#;
+        let log: RequestLog = serde_json::from_str(json).unwrap();
+        assert!(log.request_id.is_none());
+    }
+
+    #[test]
+    fn config_defaults() {
+        let config: crate::config::ObservabilityConfig = Default::default();
+        assert_eq!(config.log_retention_days, 7);
+        assert_eq!(config.log_max_size_mb, 100);
+        assert_eq!(config.log_max_files, 5);
+    }
+
+    #[test]
+    fn config_deserializes_log_settings() {
+        let yaml = r#"
+            metrics: true
+            log_retention_days: 14
+            log_max_size_mb: 50
+            log_max_files: 3
+        "#;
+        let config: crate::config::ObservabilityConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.log_retention_days, 14);
+        assert_eq!(config.log_max_size_mb, 50);
+        assert_eq!(config.log_max_files, 3);
+    }
 }

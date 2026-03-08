@@ -39,7 +39,19 @@ pub async fn chat_completions(
     let start = std::time::Instant::now();
 
     let (parts, body) = request.into_parts();
-    let headers = parts.headers.clone();
+    let mut headers = parts.headers.clone();
+
+    // Get or generate correlation ID
+    let request_id = headers.get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let id = uuid::Uuid::new_v4().to_string();
+            if let Ok(val) = axum::http::HeaderValue::from_str(&id) {
+                headers.insert("x-request-id", val);
+            }
+            id
+        });
 
     // Read body with size cap (10 MB)
     let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
@@ -136,7 +148,13 @@ pub async fn chat_completions(
                 duration_ms: duration.as_millis() as u64,
                 status: "error".to_string(),
                 path: "/v1/chat/completions".to_string(),
+                request_id: Some(request_id.clone()),
             };
+            state.metrics.record_request(
+                &log.backend,
+                &log.status,
+                log.duration_ms,
+            ).await;
             let _ = state.analytics.log_request(log).await;
 
             return Err(openai_error(
@@ -156,7 +174,14 @@ pub async fn chat_completions(
         duration_ms: duration.as_millis() as u64,
         status: status.to_string(),
         path: "/v1/chat/completions".to_string(),
+        request_id: Some(request_id.clone()),
     };
+    state.metrics.record_request(
+        &log.backend,
+        &log.status,
+        log.duration_ms,
+    ).await;
+
     if let Err(e) = state.analytics.log_request(log).await {
         tracing::error!("Failed to log request: {}", e);
     }
@@ -165,7 +190,9 @@ pub async fn chat_completions(
     let status_code = axum::http::StatusCode::from_u16(response.status().as_u16())
         .unwrap_or(axum::http::StatusCode::OK);
 
-    let mut builder = axum::response::Response::builder().status(status_code);
+    let mut builder = axum::response::Response::builder()
+        .status(status_code)
+        .header("x-request-id", &request_id);
     for (name, value) in response.headers() {
         if let (Ok(an), Ok(av)) = (
             axum::http::HeaderName::from_bytes(name.as_ref()),

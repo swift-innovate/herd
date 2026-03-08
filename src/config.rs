@@ -168,12 +168,24 @@ fn default_recovery_time() -> String { "60s".to_string() }
 pub struct ObservabilityConfig {
     #[serde(default = "default_true")]
     pub metrics: bool,
-    
+
     #[serde(default)]
     pub admin_api: bool,
-    
+
     #[serde(default)]
     pub tracing: bool,
+
+    /// Log retention in days (default: 7)
+    #[serde(default = "default_log_retention_days")]
+    pub log_retention_days: u64,
+
+    /// Max log file size in MB before rotation (default: 100, 0 = no limit)
+    #[serde(default = "default_log_max_size_mb")]
+    pub log_max_size_mb: u64,
+
+    /// Max number of rotated log files to keep (default: 5)
+    #[serde(default = "default_log_max_files")]
+    pub log_max_files: u32,
 }
 
 impl Default for ObservabilityConfig {
@@ -182,11 +194,17 @@ impl Default for ObservabilityConfig {
             metrics: true,
             admin_api: false,
             tracing: false,
+            log_retention_days: default_log_retention_days(),
+            log_max_size_mb: default_log_max_size_mb(),
+            log_max_files: default_log_max_files(),
         }
     }
 }
 
 fn default_true() -> bool { true }
+fn default_log_retention_days() -> u64 { 7 }
+fn default_log_max_size_mb() -> u64 { 100 }
+fn default_log_max_files() -> u32 { 5 }
 
 impl Config {
     pub fn from_file(path: &Path) -> Result<Self> {

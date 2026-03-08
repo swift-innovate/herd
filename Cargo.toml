@@ -1,6 +1,6 @@
 [package]
 name = "herd"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Swift Innovative Technologies"]
 description = "Intelligent Ollama router with GPU awareness"
@@ -27,6 +27,7 @@ clap = { version = "4", features = ["derive"] }
 async-trait = "0.1"
 chrono = "0.4"
 dirs = "5.0"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

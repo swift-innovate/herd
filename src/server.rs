@@ -30,6 +30,7 @@ pub struct AppState {
     pub client: Arc<reqwest::Client>,
     pub config: Config,
     pub analytics: Arc<Analytics>,
+    pub metrics: Arc<crate::metrics::Metrics>,
     pub routing_timeout_ms: Arc<AtomicU64>,
     pub routing_retry_count: Arc<AtomicU32>,
     pub config_path: Option<PathBuf>,
@@ -142,19 +143,34 @@ impl Server {
         // Initialize analytics
         let analytics = Arc::new(Analytics::new()?);
 
-        // Start 7-day cleanup task (runs daily at 3 AM)
+        // Initialize in-memory request metrics
+        let metrics = Arc::new(crate::metrics::Metrics::new());
+
+        // Start log rotation and cleanup task
         let analytics_clone = Arc::clone(&analytics);
+        let retention_days = self.config.observability.log_retention_days as i64;
+        let max_size_mb = self.config.observability.log_max_size_mb;
+        let max_files = self.config.observability.log_max_files;
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+
+                // Check rotation every hour
+                match analytics_clone.rotate_if_needed(max_size_mb, max_files).await {
+                    Ok(true) => tracing::info!("Log file rotated"),
+                    Ok(false) => {}
+                    Err(e) => tracing::error!("Log rotation failed: {}", e),
+                }
+
+                // Cleanup old entries daily at 3 AM
                 let now = chrono::Local::now();
                 let hour = now.hour();
                 let minute = now.minute();
                 if hour == 3 && minute < 5 {
-                    if let Err(e) = analytics_clone.cleanup_old(7).await {
+                    if let Err(e) = analytics_clone.cleanup_old(retention_days).await {
                         tracing::error!("Failed to cleanup old analytics: {}", e);
                     } else {
-                        tracing::info!("Cleaned up analytics logs older than 7 days");
+                        tracing::info!("Cleaned up analytics logs older than {} days", retention_days);
                     }
                 }
             }
@@ -175,6 +191,7 @@ impl Server {
             client: Arc::clone(&client),
             config: self.config.clone(),
             analytics,
+            metrics,
             routing_timeout_ms: Arc::new(AtomicU64::new(routing_timeout.as_millis() as u64)),
             routing_retry_count: Arc::new(AtomicU32::new(self.config.routing.retry_count)),
             config_path: self.config_path.clone(),
@@ -430,7 +447,20 @@ async fn proxy_handler(
         .unwrap_or(reqwest::Method::POST);
 
     // Collect request headers before consuming body
-    let headers = request.headers().clone();
+    let mut headers = request.headers().clone();
+
+    // Get or generate correlation ID
+    let request_id = headers.get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let id = uuid::Uuid::new_v4().to_string();
+            // Insert into headers so it gets forwarded to upstream
+            if let Ok(val) = axum::http::HeaderValue::from_str(&id) {
+                headers.insert("x-request-id", val);
+            }
+            id
+        });
 
     // Cap body size to prevent DoS
     let body_bytes = axum::body::to_bytes(request.into_body(), MAX_PROXY_BODY_BYTES)
@@ -512,7 +542,14 @@ async fn proxy_handler(
         duration_ms: duration.as_millis() as u64,
         status: status.to_string(),
         path: path.clone(),
+        request_id: Some(request_id.clone()),
     };
+
+    state.metrics.record_request(
+        &log.backend,
+        &log.status,
+        log.duration_ms,
+    ).await;
 
     if let Err(e) = state.analytics.log_request(log).await {
         tracing::error!("Failed to log request: {}", e);
@@ -523,7 +560,9 @@ async fn proxy_handler(
             let status_code = axum::http::StatusCode::from_u16(r.status().as_u16())
                 .unwrap_or(axum::http::StatusCode::OK);
 
-            let mut builder = axum::response::Response::builder().status(status_code);
+            let mut builder = axum::response::Response::builder()
+                .status(status_code)
+                .header("x-request-id", &request_id);
 
             // Forward response headers (bridge reqwest http 0.2 → axum http 1.x)
             for (name, value) in r.headers() {
@@ -541,7 +580,18 @@ async fn proxy_handler(
                 .body(body)
                 .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)
         }
-        None => Err(axum::http::StatusCode::BAD_GATEWAY),
+        None => {
+            let body = axum::body::Body::from(format!(
+                "{{\"error\":\"Bad Gateway\",\"request_id\":\"{}\"}}",
+                request_id
+            ));
+            Ok(axum::response::Response::builder()
+                .status(axum::http::StatusCode::BAD_GATEWAY)
+                .header("x-request-id", &request_id)
+                .header("content-type", "application/json")
+                .body(body)
+                .unwrap_or_default())
+        }
     }
 }
 
@@ -642,6 +692,10 @@ herd_backend_gpu_temperature{{name="{}"}} {}
             }
         }
     }
+
+    // Append request counters and latency histogram
+    metrics.push('\n');
+    metrics.push_str(&state.metrics.render().await);
 
     metrics
 }

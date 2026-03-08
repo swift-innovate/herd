@@ -1,36 +1,38 @@
-# v0.3.0 — Complete
+# v0.4.0 — Complete
 
-## Step 1: Backend tagging + tag-based routing
-- [x] Add `BackendPool::get_healthy_with_tags()` and tagged variants
-- [x] Extend `Router` trait to accept `tags: Option<&[String]>`
-- [x] Update all 4 router strategies
-- [x] Extract `X-Herd-Tags` header in proxy handler and chat_completions
-- [x] Tests (get_healthy_with_tags_filters, routes_with_tag_filter)
+## Step 1: Prometheus-native metrics export
+- [x] Create `src/metrics.rs` with `Metrics` struct (request counters by status/backend)
+- [x] Implement `LatencyHistogram` with cumulative buckets (10–10000ms)
+- [x] Wire `record_request()` into proxy_handler and chat_completions
+- [x] Add `/metrics` endpoint rendering Prometheus exposition format
+- [x] Tests (histogram_buckets_cumulative, records_and_renders_metrics)
 - [x] Validate build
 
-## Step 2: Health check endpoint customization
-- [x] Add `health_check_path` and `health_check_status` to Backend config
-- [x] Modify HealthChecker to use per-backend configurable path/status
-- [x] Tests (default_health_check_path, custom_health_check_config_deserializes)
+## Step 2: Request tracing with correlation IDs
+- [x] Add `uuid` dependency for UUID v4 generation
+- [x] Extract or generate `X-Request-Id` in proxy_handler and chat_completions
+- [x] Forward `X-Request-Id` to upstream backends
+- [x] Include `X-Request-Id` in response headers
+- [x] Add `request_id` field to `RequestLog` (backward-compatible with serde defaults)
+- [x] Tests (request_log serialization/deserialization with and without request_id)
 - [x] Validate build
 
-## Step 3: Hot-reload configuration
-- [x] Refactor AppState: router in RwLock, timeout/retry in atomics
-- [x] Add `AppState::reload_config()` — syncs backends, swaps router, updates settings
-- [x] Add `POST /admin/reload` endpoint (auth required)
-- [x] Add file-polling reload (30s mtime check)
-- [x] Pass config_path from main.rs through to server
+## Step 3: Log rotation and retention policies
+- [x] Add `log_retention_days`, `log_max_size_mb`, `log_max_files` to `ObservabilityConfig`
+- [x] Implement `rotate_if_needed(max_size_mb, max_files)` in Analytics
+- [x] Wire rotation into cleanup task with configurable retention
+- [x] Tests (config_defaults, config_deserializes_log_settings)
 - [x] Validate build
 
 ## Step 4: Validation & version bump
-- [x] All 27 tests pass
-- [x] ROADMAP.md updated — v0.3.0 fully complete
-- [x] Version bumped to 0.3.0
+- [x] All 34 tests pass
+- [x] ROADMAP.md updated — v0.4.0 fully complete
+- [x] Version bumped to 0.4.0
 - [x] Ready to commit
 
 ## Review
-- v0.3.0 is fully complete with all 10 roadmap items done
-- Test coverage: 27 tests (up from 6 at session start)
-- Key features: tag routing (X-Herd-Tags), health check config, hot-reload (file + API)
-- Hot-reload reloads: backends, routing strategy, timeout, retry count
-- Non-reloadable (by design): server host/port, circuit breaker thresholds, rate limit
+- v0.4.0 is fully complete with all 3 roadmap items done
+- Test coverage: 34 tests (up from 27 in v0.3.0)
+- Key features: Prometheus metrics (counters + histogram), correlation IDs (X-Request-Id), log rotation
+- Zero new external dependencies for metrics (in-memory atomics)
+- Backward-compatible RequestLog (request_id uses serde default)
