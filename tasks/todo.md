@@ -1,47 +1,44 @@
-# Auto-Update Feature — Complete
+# Herd — Current Status
 
-## Step 1: Add `self_update` dependency
-- [x] Add `self_update` crate to Cargo.toml (v0.42, with archive-zip, archive-tar, compression features)
-- [x] Validate build (85 new transitive deps)
+**Version:** 0.4.1
+**Branch:** main
+**Last pushed:** 2026-03-09
 
-## Step 2: Create `src/updater.rs` module
-- [x] Implement `check_for_update()` — returns UpdateInfo with current/latest/update_available
-- [x] Implement `perform_update()` — downloads + replaces binary from GitHub Releases
-- [x] Implement `startup_update_check()` — background async notification on server start
-- [x] Version comparison logic with `v` prefix handling
-- [x] Register module in `lib.rs`
-- [x] Tests (version_comparison_newer, version_comparison_same_or_older, version_comparison_handles_v_prefix)
+## Completed Milestones
 
-## Step 3: CLI `--update` flag
-- [x] Add `--update` flag to Cli struct in `main.rs`
-- [x] When `--update` is passed, check + download + exit
-- [x] Progress bar shown for CLI downloads
+### v0.2.1 — Security Hardening ✅
+Circuit breaker, API key auth, proxy hardening, rate limiting
 
-## Step 4: `POST /admin/update` endpoint
-- [x] Add endpoint in `server.rs` (behind auth middleware)
-- [x] Returns JSON with update status/result
-- [x] Notifies that restart is required after update
+### v0.3.0 — Routing & Reliability ✅
+Weighted round-robin, tag-based routing, health check config, hot-reload, OpenAI compat
 
-## Step 5: Startup update check
-- [x] Background `spawn_blocking` check on server start
-- [x] Logs info message if update is available
+### v0.4.0/v0.4.1 — Observability & Operations ✅
+- Prometheus metrics (`/metrics` endpoint, in-memory counters + latency histogram)
+- Correlation IDs (X-Request-Id propagation)
+- Log rotation (size-based, configurable retention)
+- Auto-update (`herd --update`, `POST /admin/update`, startup check)
+- GitHub Actions CI (test 3 platforms, clippy, fmt) + Release (5 target builds)
+- v0.4.1 fix: graceful config error handling (no more restart loops)
 
-## Step 6: Refactor `/update` endpoint
-- [x] Replaced manual GitHub API call with `updater::check_for_update()`
-- [x] Consistent version checking across CLI, API, and startup
+**Test coverage:** 37 tests
+**CI status:** GitHub Actions running on push/PR + release on tag
 
-## Step 7: Validation
-- [x] Build passes
-- [x] All 37 tests pass (34 existing + 3 new)
-- [x] README updated with auto-update docs
-- [x] Ready to commit
+## Next: v0.5.0 — Scale & Ecosystem
 
-## Review
-- Auto-update uses `self_update` crate for GitHub Releases integration
-- `herd --update`: CLI-triggered update with progress bar
-- `POST /admin/update`: API-triggered update (auth required), returns JSON
-- `GET /update`: Check-only (no install), now uses same updater module
-- Startup: background check with log notification
-- `self_update` handles Windows binary replacement (rename trick) automatically
-- Platform matching via target triple (e.g., x86_64-pc-windows-msvc)
-- Requires GitHub Releases with platform-specific assets to function
+| Item | Complexity | Notes |
+|------|-----------|-------|
+| Multi-node discovery (mDNS / static fleet) | High | Auto-discover Ollama nodes |
+| TLS termination | Medium | rustls integration, addresses SECURITY-REVIEW finding |
+| Per-client rate limiting | Medium | Extend token-bucket to per-API-key |
+| Plugin system for custom routing | High | Trait-based or WASM |
+| Distributed health consensus | High | Gossip protocol |
+
+## Key Files
+- `src/server.rs` — AppState, proxy handler, all HTTP handlers
+- `src/api/openai.rs` — OpenAI-compatible endpoints
+- `src/router/` — 4 routing strategies (priority, model_aware, least_busy, weighted_round_robin)
+- `src/metrics.rs` — Prometheus metrics
+- `src/updater.rs` — Auto-update from GitHub Releases
+- `src/analytics.rs` — JSONL logging + log rotation
+- `src/config.rs` — YAML config with serde defaults
+- `.github/workflows/` — CI + Release workflows

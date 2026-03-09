@@ -1,6 +1,6 @@
 # Herd Roadmap
 
-**Updated:** March 8, 2026
+**Updated:** March 9, 2026
 
 ## Vision
 
@@ -38,11 +38,14 @@ No cloud dependency. No API keys exposed. Full local control.
 - ~~Health check endpoint customization (configurable path and expected status)~~ ✅
 - ~~Hot-reload configuration without restart~~ ✅ (file polling + POST /admin/reload)
 
-### v0.4.0 — Observability & Operations ✅
+### v0.4.0 — Observability & Operations ✅ (v0.4.1)
 
 - ~~Prometheus-native metrics export~~ ✅ (in-memory counters + histogram, `/metrics` endpoint)
 - ~~Request tracing with correlation IDs~~ ✅ (X-Request-Id propagation + UUID v4 generation)
 - ~~Log rotation and retention policies~~ ✅ (size-based rotation, configurable retention days)
+- ~~Auto-update from GitHub Releases~~ ✅ (`herd --update`, `POST /admin/update`)
+- ~~GitHub Actions CI/CD~~ ✅ (test on 3 platforms, release builds for 5 targets)
+- ~~Graceful config error handling~~ ✅ (v0.4.1 — warn+disable instead of crash)
 
 ### v0.5.0+ — Scale & Ecosystem (Q3 2026)
 
