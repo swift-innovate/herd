@@ -239,7 +239,8 @@ impl Server {
             // GPU handler
             .route("/gpu", axum::routing::get(gpu_handler))
             // Agent skills reference
-            .route("/skills", axum::routing::get(skills_handler));
+            .route("/skills", axum::routing::get(skills_handler))
+            .route("/skills.md", axum::routing::get(skills_md_handler));
 
         // Conditionally mount metrics
         if self.config.observability.metrics {
@@ -995,6 +996,13 @@ async fn skills_handler(
 
 async fn dashboard_handler() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../dashboard.html"))
+}
+
+async fn skills_md_handler() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+        include_str!("../skills.md"),
+    )
 }
 
 pub async fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
