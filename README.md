@@ -11,7 +11,7 @@ Running multiple agents + parallel tool calls? Herd stops the GPU wars.
 Just set your OpenClaw `baseUrl` to `http://your-herd:40114` — done.
 Model homing + live VRAM routing keeps every agent on the fastest node.
 
-> **Pro tip:** Point your agents at Herd and they instantly become GPU-smart. No config changes — just swap the base URL and every agent gets model-aware routing, automatic failover, and load balancing across your entire GPU cluster.
+> **Pro tip:** Point your OpenClaw agents at Herd and they instantly become GPU-smart — live VRAM routing, model homing, zero cold-start tax, and buttery parallel tool calls across your whole swarm.
 <img width="1735" height="803" alt="image" src="https://github.com/user-attachments/assets/d625b30f-8110-482e-80cd-e3297a5ff428" />
 
 
