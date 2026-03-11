@@ -33,20 +33,23 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint
 - **Auto-update** — `herd --update` or `POST /admin/update` (new in v0.4.0)
 
-### Observability 📊
+### Agent-Friendly
+- **Agent skills reference** — [`skills.md`](skills.md) teaches AI agents how to use Herd's API, routing, and headers
+- **Dashboard Agent Guide** — Built-in tab at `/dashboard` with endpoint tables, best practices, and error handling
+- **OpenAI drop-in** — Point any agent's `base_url` to Herd and it just works
+- **Correlation IDs** — `X-Request-Id` propagation for distributed agent tracing
+- **Tag-based routing** — Agents can target specific backends via `X-Herd-Tags` header
+
+### Observability
 - **Prometheus metrics** — `/metrics` endpoint with request counters, backend gauges, and latency histogram
-- **Correlation IDs** — `X-Request-Id` header propagation (reuses client ID or generates UUID v4)
 - **Log rotation** — Size-based rotation with configurable retention (days, max size, max files)
 - **Request analytics** — JSONL logging with auto-retention
-- **Interactive dashboard** — Real-time charts with Chart.js
-  - Request volume timeline (last 20 minutes)
-  - Requests by model (top 5)
-  - Requests by backend
+- **Interactive dashboard** — Real-time charts with Chart.js (Backends, Analytics, Agent Guide tabs)
 - **GPU metrics** — Real-time VRAM, utilization, temperature
 - **Latency tracking** — P50, P95, P99 percentiles
 - **Update checker** — Automatic GitHub release notifications
 
-> **v0.4.0 is here.** Prometheus metrics, correlation IDs, and log rotation. See the [Roadmap](ROADMAP.md) for what's next.
+> **v0.4.1** — Agent Guide dashboard tab, skills.md reference, Prometheus metrics, correlation IDs, log rotation. See the [Roadmap](ROADMAP.md) for what's next.
 
 ## Quick Start
 
@@ -63,6 +66,20 @@ herd --port 40114 \
   --backend minipc=http://minipc:11434:80 \
   --backend warden=http://warden:11434:50
 ```
+
+## For AI Agents
+
+Herd ships with built-in documentation for AI agents routed through it:
+
+- **[`skills.md`](skills.md)** — Complete API reference, headers, routing behavior, best practices, and example workflows. Point your agent at this file so it knows how to use Herd optimally.
+- **Dashboard Agent Guide** — The `/dashboard` includes an "Agent Guide" tab with endpoint tables, do/don't checklists, and error handling — accessible from the browser.
+
+**Key things agents should know:**
+1. Always specify `"model"` in requests for optimal routing
+2. Use `"stream": true` for long responses
+3. Send `X-Herd-Tags` to target specific backends
+4. Send `X-Request-Id` for traceability across distributed systems
+5. Query `GET /v1/models` to discover available models before requesting
 
 ## Configuration
 
@@ -178,6 +195,7 @@ Access the interactive dashboard at `http://your-herd:40114/dashboard`
 - Model homing status and idle timers
 - One-click backend management (add/edit/remove)
 - Automatic update notifications
+- **Agent Guide tab** — API reference, best practices, and error handling for AI agents
 
 ### Request Logging
 All proxied requests are logged to `~/.herd/requests.jsonl`:
