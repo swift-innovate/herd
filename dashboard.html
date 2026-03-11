@@ -251,6 +251,66 @@
         .empty-state-title { font-size: 16px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; }
         .empty-state-text { font-size: 13px; }
 
+        /* Agent Guide */
+        .agent-guide { max-width: 900px; }
+        .guide-section { margin-bottom: 32px; }
+        .guide-section h2 {
+            font-size: 18px; font-weight: 700; color: #e2e8f0;
+            margin-bottom: 16px; padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .guide-section p { font-size: 14px; color: #94a3b8; line-height: 1.6; margin-bottom: 12px; }
+        .guide-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px; padding: 20px; margin-bottom: 12px;
+        }
+        .guide-card h3 { font-size: 15px; font-weight: 600; color: #818cf8; margin-bottom: 10px; }
+        .guide-card p { font-size: 13px; color: #94a3b8; margin-top: 10px; margin-bottom: 0; }
+        .guide-card pre {
+            background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px 16px;
+            overflow-x: auto; font-size: 13px; line-height: 1.5;
+        }
+        .guide-card code, .guide-table code {
+            color: #4ade80; font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .guide-table {
+            width: 100%; border-collapse: collapse; font-size: 13px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06); border-radius: 12px;
+            overflow: hidden;
+        }
+        .guide-table th {
+            text-align: left; padding: 10px 16px; color: #64748b; font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 12px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .guide-table td {
+            padding: 10px 16px; color: #94a3b8;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .guide-table tr:last-child td { border-bottom: none; }
+        .guide-table .admin-row td { color: #64748b; }
+        .practices-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .practice {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px; padding: 20px;
+        }
+        .practice h4 { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+        .practice.do { border-top: 2px solid #4ade80; }
+        .practice.do h4 { color: #4ade80; }
+        .practice.dont { border-top: 2px solid #ef4444; }
+        .practice.dont h4 { color: #ef4444; }
+        .practice ul { list-style: none; padding: 0; }
+        .practice li {
+            font-size: 13px; color: #94a3b8; padding: 4px 0;
+            padding-left: 16px; position: relative;
+        }
+        .practice.do li::before { content: '\2713'; position: absolute; left: 0; color: #4ade80; }
+        .practice.dont li::before { content: '\2717'; position: absolute; left: 0; color: #ef4444; }
+        .practice code { color: #818cf8; font-size: 12px; }
+
         /* Mobile Responsive */
         @media (max-width: 900px) {
             .chart-grid { grid-template-columns: 1fr; }
@@ -261,6 +321,7 @@
             .header { flex-direction: column; gap: 12px; align-items: flex-start; }
             .header-right { width: 100%; justify-content: space-between; }
             .grid { grid-template-columns: 1fr; }
+            .practices-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 480px) {
             .stats-row { grid-template-columns: 1fr; }
@@ -319,6 +380,9 @@
             <div class="tab" data-tab="analytics" onclick="switchTab('analytics')">
                 Analytics
             </div>
+            <div class="tab" data-tab="agent-guide" onclick="switchTab('agent-guide')">
+                Agent Guide
+            </div>
         </div>
 
         <!-- Backends Tab -->
@@ -364,10 +428,140 @@
             </div>
         </div>
 
+        <!-- Agent Guide Tab -->
+        <div class="tab-content" id="tab-agent-guide">
+            <div class="agent-guide">
+                <div class="guide-section">
+                    <h2>Agent Quick Start</h2>
+                    <p>Herd is a reverse proxy between you and Ollama backends. Send requests to Herd — it picks the best backend based on model availability, GPU load, and tags.</p>
+
+                    <div class="guide-card">
+                        <h3>1. Discover Models</h3>
+                        <pre><code>GET /v1/models</code></pre>
+                        <p>Returns all models available across healthy backends. Always check before requesting an unknown model.</p>
+                    </div>
+
+                    <div class="guide-card">
+                        <h3>2. Send Chat Requests</h3>
+                        <pre><code>POST /v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "qwen2.5-coder:32b",
+  "messages": [
+    {"role": "user", "content": "Hello"}
+  ],
+  "stream": true
+}</code></pre>
+                        <p>OpenAI-compatible. Your existing client libraries work unchanged. Always specify the model for optimal routing.</p>
+                    </div>
+
+                    <div class="guide-card">
+                        <h3>3. Target Specific Backends</h3>
+                        <pre><code>X-Herd-Tags: gpu,fast</code></pre>
+                        <p>Add this header to route only to backends matching all specified tags. Use for workload isolation.</p>
+                    </div>
+
+                    <div class="guide-card">
+                        <h3>4. Trace Requests</h3>
+                        <pre><code>X-Request-Id: agent-task-42</code></pre>
+                        <p>Send a correlation ID to trace requests in logs. If omitted, Herd generates a UUID v4 and returns it.</p>
+                    </div>
+                </div>
+
+                <div class="guide-section">
+                    <h2>Endpoints</h2>
+                    <table class="guide-table">
+                        <thead>
+                            <tr><th>Action</th><th>Method</th><th>Endpoint</th><th>Auth</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Chat (OpenAI)</td><td>POST</td><td><code>/v1/chat/completions</code></td><td>No</td></tr>
+                            <tr><td>List models</td><td>GET</td><td><code>/v1/models</code></td><td>No</td></tr>
+                            <tr><td>Health check</td><td>GET</td><td><code>/health</code></td><td>No</td></tr>
+                            <tr><td>Cluster status</td><td>GET</td><td><code>/status</code></td><td>No</td></tr>
+                            <tr><td>GPU metrics</td><td>GET</td><td><code>/gpu</code></td><td>No</td></tr>
+                            <tr><td>Analytics</td><td>GET</td><td><code>/analytics?hours=24</code></td><td>No</td></tr>
+                            <tr><td>Prometheus</td><td>GET</td><td><code>/metrics</code></td><td>No</td></tr>
+                            <tr><td>Ollama generate</td><td>POST</td><td><code>/api/generate</code></td><td>No</td></tr>
+                            <tr><td>Ollama chat</td><td>POST</td><td><code>/api/chat</code></td><td>No</td></tr>
+                            <tr><td>Ollama models</td><td>GET</td><td><code>/api/tags</code></td><td>No</td></tr>
+                            <tr class="admin-row"><td>List backends</td><td>GET</td><td><code>/admin/backends</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Add backend</td><td>POST</td><td><code>/admin/backends</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Reload config</td><td>POST</td><td><code>/admin/reload</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Self-update</td><td>POST</td><td><code>/admin/update</code></td><td>Yes</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="guide-section">
+                    <h2>Routing Strategies</h2>
+                    <p>The active strategy is shown in the header badge. It determines how Herd picks a backend for your request.</p>
+                    <table class="guide-table">
+                        <thead>
+                            <tr><th>Strategy</th><th>Behavior</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>model_aware</code></td><td>Prefers backends with your model already loaded. Avoids cold starts. <strong>(default)</strong></td></tr>
+                            <tr><td><code>priority</code></td><td>Always routes to the highest-priority healthy backend.</td></tr>
+                            <tr><td><code>least_busy</code></td><td>Routes to the lowest GPU utilization.</td></tr>
+                            <tr><td><code>weighted_round_robin</code></td><td>Distributes across backends weighted by priority.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="guide-section">
+                    <h2>Best Practices</h2>
+                    <div class="practices-grid">
+                        <div class="practice do">
+                            <h4>Do</h4>
+                            <ul>
+                                <li>Always specify <code>"model"</code> in requests</li>
+                                <li>Use <code>"stream": true</code> for long responses</li>
+                                <li>Query <code>/v1/models</code> before requesting unknown models</li>
+                                <li>Send <code>X-Request-Id</code> for traceability</li>
+                                <li>Use <code>X-Herd-Tags</code> for workload isolation</li>
+                                <li>Retry on 503 — circuit breaker will recover backends</li>
+                            </ul>
+                        </div>
+                        <div class="practice dont">
+                            <h4>Don't</h4>
+                            <ul>
+                                <li>Don't hard-code backend URLs — always go through Herd</li>
+                                <li>Don't omit the model — routing can't optimize without it</li>
+                                <li>Don't ignore 429 — back off when rate-limited</li>
+                                <li>Don't send huge payloads — 10 MB body limit</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="guide-section">
+                    <h2>Error Responses</h2>
+                    <table class="guide-table">
+                        <thead>
+                            <tr><th>Status</th><th>Meaning</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>502</code></td><td>Backend failed</td><td>Retry — Herd will try another backend</td></tr>
+                            <tr><td><code>503</code></td><td>No healthy backend available</td><td>Wait a few seconds, then retry</td></tr>
+                            <tr><td><code>413</code></td><td>Request body too large (&gt;10 MB)</td><td>Reduce payload size</td></tr>
+                            <tr><td><code>429</code></td><td>Rate limit exceeded</td><td>Back off and retry</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="guide-section">
+                    <h2>Full Reference</h2>
+                    <p>For the complete agent skills reference, see <a href="https://github.com/swift-innovate/herd/blob/main/skills.md" target="_blank" style="color: #818cf8;">skills.md</a> in the repository.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer -->
         <div class="footer">
             <span id="last-update">Updating...</span>
-            <span id="version-info">Herd v0.2.1</span>
+            <span id="version-info">Herd v0.4.1</span>
         </div>
     </div>
 
