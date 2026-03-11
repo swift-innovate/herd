@@ -299,6 +299,18 @@ Herd sends a request to load that model. This means popular models stay warm.
 | Ollama chat | POST | `/api/chat` |
 | Ollama models | GET | `/api/tags` |
 | Dashboard | GET | `/dashboard` |
+| Skills (this data as JSON) | GET | `/skills` |
+
+## Self-Onboarding
+
+Agents can fetch their own best-practice prompt at startup:
+
+```bash
+curl http://herd:40114/skills
+```
+
+Returns structured JSON with endpoints, headers, best practices, and error codes.
+Use this to bootstrap your system prompt or tool configuration.
 
 ## Example: Full Agent Workflow
 
