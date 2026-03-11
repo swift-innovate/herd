@@ -559,6 +559,22 @@ async fn proxy_handler(
 
         match req_builder.send().await {
             Ok(r) => {
+                // Treat 404 on model endpoints as retryable — model was likely
+                // evicted by Ollama, another backend may still have it warm.
+                let is_model_endpoint = path.contains("/api/generate")
+                    || path.contains("/api/chat")
+                    || path.contains("/v1/chat/completions")
+                    || path.contains("/v1/completions");
+
+                if r.status().as_u16() == 404 && is_model_endpoint {
+                    tracing::warn!(
+                        "Backend {} returned 404 for {} — model likely evicted, retrying",
+                        backend.name,
+                        path
+                    );
+                    continue;
+                }
+
                 state.pool.mark_healthy(&backend.name).await;
                 response = Some(r);
                 break;

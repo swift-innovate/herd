@@ -174,10 +174,10 @@ impl Default for CircuitBreakerConfig {
 }
 
 fn default_failure_threshold() -> u32 {
-    3
+    5
 }
 fn default_recovery_time() -> String {
-    "60s".to_string()
+    "30s".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -104,7 +104,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prefers_higher_priority_with_model() {
+    async fn prefers_least_busy_with_model() {
+        use crate::backend::GpuMetrics;
+
         let pool = BackendPool::new(
             vec![make_backend("gpu1", 100), make_backend("gpu2", 50)],
             3,
@@ -115,9 +117,31 @@ mod tests {
         pool.update_models("gpu1", vec!["llama3".into()]).await;
         pool.update_models("gpu2", vec!["llama3".into()]).await;
 
+        // gpu1 is under heavy load, gpu2 is idle
+        pool.update_gpu_metrics(
+            "gpu1",
+            GpuMetrics {
+                utilization: 90.0,
+                memory_used: 12000,
+                memory_total: 16000,
+                temperature: 75.0,
+            },
+        )
+        .await;
+        pool.update_gpu_metrics(
+            "gpu2",
+            GpuMetrics {
+                utilization: 5.0,
+                memory_used: 2000,
+                memory_total: 16000,
+                temperature: 40.0,
+            },
+        )
+        .await;
+
         let router = ModelAwareRouter::new(pool);
         let result = router.route(Some("llama3"), None).await.unwrap();
-        // Should pick gpu1 since it has higher priority among model-bearing backends
-        assert_eq!(result.name, "gpu1");
+        // Should pick gpu2 (least busy) despite gpu1 having higher priority
+        assert_eq!(result.name, "gpu2");
     }
 }

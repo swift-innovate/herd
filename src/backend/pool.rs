@@ -96,7 +96,13 @@ impl BackendPool {
         backends
             .iter()
             .filter(|b| b.healthy && b.models.contains(&model.to_string()))
-            .max_by_key(|b| b.config.priority)
+            .min_by(|a, b| {
+                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                a_busy
+                    .partial_cmp(&b_busy)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .cloned()
     }
 
@@ -187,7 +193,13 @@ impl BackendPool {
                     && b.models.contains(&model.to_string())
                     && tags.iter().all(|t| b.config.tags.contains(t))
             })
-            .max_by_key(|b| b.config.priority)
+            .min_by(|a, b| {
+                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+                a_busy
+                    .partial_cmp(&b_busy)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .cloned()
     }
 
@@ -364,12 +376,35 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(result.unwrap().config.name, "gpu2");
 
-        // Load model on gpu1 as well; should prefer gpu1 (higher priority)
+        // Load model on gpu1 as well — both have model, should prefer least busy
         pool.update_models("gpu1", vec!["llama3".into()]).await;
+
+        // gpu1 is busy (80% utilization), gpu2 is idle (10%)
+        pool.update_gpu_metrics(
+            "gpu1",
+            GpuMetrics {
+                utilization: 80.0,
+                memory_used: 8000,
+                memory_total: 16000,
+                temperature: 70.0,
+            },
+        )
+        .await;
+        pool.update_gpu_metrics(
+            "gpu2",
+            GpuMetrics {
+                utilization: 10.0,
+                memory_used: 2000,
+                memory_total: 16000,
+                temperature: 45.0,
+            },
+        )
+        .await;
 
         let result = pool.get_by_model("llama3").await;
         assert!(result.is_some());
-        assert_eq!(result.unwrap().config.name, "gpu1");
+        // Should pick gpu2 (least busy) even though gpu1 has higher priority
+        assert_eq!(result.unwrap().config.name, "gpu2");
     }
 
     #[tokio::test]
