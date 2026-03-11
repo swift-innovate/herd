@@ -237,7 +237,9 @@ impl Server {
             // Update check
             .route("/update", axum::routing::get(update_check_handler))
             // GPU handler
-            .route("/gpu", axum::routing::get(gpu_handler));
+            .route("/gpu", axum::routing::get(gpu_handler))
+            // Agent skills reference
+            .route("/skills", axum::routing::get(skills_handler));
 
         // Conditionally mount metrics
         if self.config.observability.metrics {
@@ -907,6 +909,88 @@ async fn gpu_handler(
             "backends": gpu_data
         }))
     }
+}
+
+async fn skills_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> axum::Json<serde_json::Value> {
+    let strategy = format!("{:?}", state.config.routing.strategy);
+
+    axum::Json(serde_json::json!({
+        "herd_version": env!("CARGO_PKG_VERSION"),
+        "routing_strategy": strategy,
+        "endpoints": {
+            "chat": {
+                "method": "POST",
+                "path": "/v1/chat/completions",
+                "description": "OpenAI-compatible chat completions (streaming supported)",
+                "auth": false
+            },
+            "models": {
+                "method": "GET",
+                "path": "/v1/models",
+                "description": "List all models across healthy backends",
+                "auth": false
+            },
+            "status": {
+                "method": "GET",
+                "path": "/status",
+                "description": "Cluster health, backend details, GPU metrics",
+                "auth": false
+            },
+            "health": {
+                "method": "GET",
+                "path": "/health",
+                "description": "Liveness check — returns OK",
+                "auth": false
+            },
+            "generate": {
+                "method": "POST",
+                "path": "/api/generate",
+                "description": "Ollama single-turn generation (proxied)",
+                "auth": false
+            },
+            "chat_ollama": {
+                "method": "POST",
+                "path": "/api/chat",
+                "description": "Ollama multi-turn chat (proxied)",
+                "auth": false
+            },
+            "analytics": {
+                "method": "GET",
+                "path": "/analytics?hours=24",
+                "description": "Request stats, latency percentiles, timeline",
+                "auth": false
+            },
+            "metrics": {
+                "method": "GET",
+                "path": "/metrics",
+                "description": "Prometheus exposition format",
+                "auth": false
+            }
+        },
+        "headers": {
+            "X-Herd-Tags": "Comma-separated tags to target specific backends (e.g. 'gpu,fast')",
+            "X-Request-Id": "Correlation ID — send your own or Herd generates a UUID v4",
+            "X-API-Key": "Required for admin endpoints only"
+        },
+        "best_practices": [
+            "Always specify 'model' in requests for optimal routing",
+            "Use 'stream': true for long responses to avoid timeouts",
+            "Query GET /v1/models to discover available models before requesting",
+            "Send X-Herd-Tags to target backends suited for your workload",
+            "Send X-Request-Id for traceability across distributed systems",
+            "Retry on 503 — circuit breaker auto-recovers backends",
+            "Never hard-code backend URLs — always route through Herd",
+            "Body size limit is 10 MB"
+        ],
+        "error_codes": {
+            "502": "Backend failed — Herd will retry on another backend",
+            "503": "No healthy backend available — wait and retry",
+            "413": "Request body too large (>10 MB)",
+            "429": "Rate limit exceeded — back off and retry"
+        }
+    }))
 }
 
 async fn dashboard_handler() -> axum::response::Html<&'static str> {

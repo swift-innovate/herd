@@ -10,6 +10,8 @@
 Running multiple agents + parallel tool calls? Herd stops the GPU wars.
 Just set your OpenClaw `baseUrl` to `http://your-herd:40114` — done.
 Model homing + live VRAM routing keeps every agent on the fastest node.
+
+> **Pro tip:** Point your agents at Herd and they instantly become GPU-smart. No config changes — just swap the base URL and every agent gets model-aware routing, automatic failover, and load balancing across your entire GPU cluster.
 <img width="1735" height="803" alt="image" src="https://github.com/user-attachments/assets/d625b30f-8110-482e-80cd-e3297a5ff428" />
 
 
@@ -71,8 +73,14 @@ herd --port 40114 \
 
 Herd ships with built-in documentation for AI agents routed through it:
 
-- **[`skills.md`](skills.md)** — Complete API reference, headers, routing behavior, best practices, and example workflows. Point your agent at this file so it knows how to use Herd optimally.
-- **Dashboard Agent Guide** — The `/dashboard` includes an "Agent Guide" tab with endpoint tables, do/don't checklists, and error handling — accessible from the browser.
+- **`GET /skills`** — JSON endpoint agents can fetch at startup for best practices, endpoints, headers, and error codes. Self-service onboarding.
+- **[`skills.md`](skills.md)** — Complete API reference with examples. Point your agent at this file for the full guide.
+- **Dashboard Agent Guide** — The `/dashboard` includes an "Agent Guide" tab with endpoint tables, do/don't checklists, and error handling.
+
+```bash
+# Agent self-onboarding: fetch skills at startup
+curl http://herd:40114/skills | jq .best_practices
+```
 
 **Key things agents should know:**
 1. Always specify `"model"` in requests for optimal routing
@@ -175,6 +183,7 @@ Request IDs are included in JSONL analytics logs for correlation across systems.
 | `GET /update` | Check for new releases |
 | `GET /metrics` | Prometheus metrics |
 | `GET /health` | K8s liveness probe |
+| `GET /skills` | Agent skills JSON (endpoints, headers, best practices) |
 | `POST /admin/backends` | Add backend at runtime |
 | `GET /admin/backends/:name` | Get backend details |
 | `PUT /admin/backends/:name` | Update backend config |
