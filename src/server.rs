@@ -484,6 +484,27 @@ fn copy_request_headers(
     builder
 }
 
+/// Injects `keep_alive` into an Ollama-native request body.
+/// Only applies to /api/generate and /api/chat; all other paths and
+/// invalid JSON bodies are returned unchanged.
+fn inject_keep_alive(body: &[u8], path: &str, keep_alive: &str) -> axum::body::Bytes {
+    let is_ollama_endpoint =
+        path.contains("/api/generate") || path.contains("/api/chat");
+    if !is_ollama_endpoint {
+        return axum::body::Bytes::copy_from_slice(body);
+    }
+    let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return axum::body::Bytes::copy_from_slice(body);
+    };
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("keep_alive".to_string(), serde_json::Value::String(keep_alive.to_string()));
+    }
+    match serde_json::to_vec(&payload) {
+        Ok(modified) => axum::body::Bytes::from(modified),
+        Err(_) => axum::body::Bytes::copy_from_slice(body),
+    }
+}
+
 async fn proxy_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,
@@ -538,6 +559,10 @@ async fn proxy_handler(
         }
     }
 
+    // Inject keep_alive for Ollama-native endpoints
+    let keep_alive_value = state.config.read().await.routing.default_keep_alive.clone();
+    let forward_bytes = inject_keep_alive(&body_bytes, &path, &keep_alive_value);
+
     // Extract tags from X-Herd-Tags header (comma-separated)
     let tags: Option<Vec<String>> = headers
         .get("x-herd-tags")
@@ -571,7 +596,7 @@ async fn proxy_handler(
             .client
             .request(method.clone(), &url)
             .timeout(state.routing_timeout())
-            .body(body_bytes.clone());
+            .body(forward_bytes.clone());
         let req_builder = copy_request_headers(&headers, req_builder);
 
         match req_builder.send().await {
@@ -1128,5 +1153,49 @@ mod tests {
         assert_eq!(state.pool.all().await, vec![String::from("new")]);
 
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn keep_alive_injected_into_api_generate() {
+        let body = serde_json::json!({"model": "llama3", "prompt": "hi"});
+        let bytes = serde_json::to_vec(&body).unwrap();
+        let result = inject_keep_alive(&bytes, "/api/generate", "-1");
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["keep_alive"], "-1");
+        assert_eq!(parsed["model"], "llama3");
+    }
+
+    #[test]
+    fn keep_alive_injected_into_api_chat() {
+        let body = serde_json::json!({"model": "llama3", "messages": []});
+        let bytes = serde_json::to_vec(&body).unwrap();
+        let result = inject_keep_alive(&bytes, "/api/chat", "-1");
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["keep_alive"], "-1");
+    }
+
+    #[test]
+    fn keep_alive_not_injected_on_v1_path() {
+        let body = serde_json::json!({"model": "llama3", "messages": []});
+        let bytes = serde_json::to_vec(&body).unwrap();
+        let result = inject_keep_alive(&bytes, "/v1/chat/completions", "-1");
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert!(!parsed.as_object().unwrap().contains_key("keep_alive"));
+    }
+
+    #[test]
+    fn keep_alive_overwrites_existing_client_value() {
+        let body = serde_json::json!({"model": "llama3", "prompt": "hi", "keep_alive": "5m"});
+        let bytes = serde_json::to_vec(&body).unwrap();
+        let result = inject_keep_alive(&bytes, "/api/generate", "-1");
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["keep_alive"], "-1");
+    }
+
+    #[test]
+    fn keep_alive_passthrough_on_invalid_json() {
+        let bad = b"not json at all";
+        let result = inject_keep_alive(bad, "/api/generate", "-1");
+        assert_eq!(result.as_ref(), bad.as_ref());
     }
 }
