@@ -32,15 +32,15 @@
 Spec: `docs/superpowers/specs/2026-03-13-keep-alive-hot-models-design.md`
 
 ### Plan
-- [ ] Add `default_keep_alive: String` to `RoutingConfig` (default `"-1"`)
-- [ ] Add `ModelWarmerConfig { interval_secs: u64 }` to `Config` (default 240)
-- [ ] Add `hot_models: Vec<String>` to `Backend`, remove `default_model`
-- [ ] Inject `keep_alive` in proxy_handler for `/api/generate` + `/api/chat`
-- [ ] Write `src/backend/warmer.rs` (ModelWarmer)
-- [ ] Delete `src/model_homing.rs`, remove ModelHoming from server.rs + config.rs
-- [ ] Add 4 unit tests (see spec)
-- [ ] Update skills.md with new config fields
-- [ ] Commit + tag v0.4.3
+- [x] Add `default_keep_alive: String` to `RoutingConfig` (default `"-1"`)
+- [x] Add `ModelWarmerConfig { interval_secs: u64 }` to `Config` (default 240)
+- [x] Add `hot_models: Vec<String>` to `Backend`, remove `default_model`
+- [x] Inject `keep_alive` in proxy_handler for `/api/generate` + `/api/chat`
+- [x] Write `src/backend/warmer.rs` (ModelWarmer)
+- [x] Delete `src/model_homing.rs`, remove ModelHoming from server.rs + config.rs
+- [x] Add 4 unit tests (see spec)
+- [x] Update skills.md with new config fields
+- [x] Commit + tag v0.4.3
 
 ## Parked: GitHub Sponsors → Herd-Pro Access
 ## Completed: v0.2.1, v0.3.0, v0.4.0/v0.4.1, v0.4.2
