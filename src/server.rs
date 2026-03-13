@@ -1,6 +1,6 @@
 use crate::analytics::{Analytics, RequestLog};
 use crate::api::{admin, openai};
-use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
+use crate::backend::{BackendPool, HealthChecker, ModelDiscovery, ModelWarmer};
 use crate::config::{parse_duration, Config};
 use crate::router::{create_router, Router};
 use anyhow::Result;
@@ -158,9 +158,8 @@ impl Server {
         let discovery = ModelDiscovery::new(60);
         discovery.spawn(pool.clone()).await;
 
-        // TODO Task 3: replace with ModelWarmer::spawn
-        // let homing = ModelHoming::new(self.config.routing.idle_timeout_minutes);
-        // homing.spawn(pool.clone()).await;
+        let warmer = ModelWarmer::new(self.config.model_warmer.interval_secs);
+        warmer.spawn(pool.clone()).await;
 
         // Initialize analytics
         let analytics = Arc::new(Analytics::new()?);
