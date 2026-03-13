@@ -2,7 +2,6 @@ use crate::analytics::{Analytics, RequestLog};
 use crate::api::{admin, openai};
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery};
 use crate::config::{parse_duration, Config};
-use crate::model_homing::ModelHoming;
 use crate::router::{create_router, Router};
 use anyhow::Result;
 use chrono::Timelike;
@@ -159,9 +158,9 @@ impl Server {
         let discovery = ModelDiscovery::new(60);
         discovery.spawn(pool.clone()).await;
 
-        // Start model homing (every 5 minutes)
-        let homing = ModelHoming::new(self.config.routing.idle_timeout_minutes);
-        homing.spawn(pool.clone()).await;
+        // TODO Task 3: replace with ModelWarmer::spawn
+        // let homing = ModelHoming::new(self.config.routing.idle_timeout_minutes);
+        // homing.spawn(pool.clone()).await;
 
         // Initialize analytics
         let analytics = Arc::new(Analytics::new()?);
@@ -700,7 +699,7 @@ async fn status_handler(
                 "models": backend.models,
                 "model_count": backend.models.len(),
                 "current_model": backend.current_model,
-                "default_model": backend.config.default_model,
+                "hot_models": backend.config.hot_models,
                 "idle_seconds": idle_secs,
                 "healthy": backend.healthy,
                 "vram_total_mb": backend.vram_total_mb,
@@ -727,7 +726,6 @@ async fn status_handler(
         "healthy_backends": healthy,
         "unhealthy_backends": unhealthy,
         "routing_strategy": format!("{:?}", config.routing.strategy),
-        "idle_timeout_minutes": config.routing.idle_timeout_minutes,
     }))
 }
 

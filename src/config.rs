@@ -20,6 +20,9 @@ pub struct Config {
 
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    #[serde(default)]
+    pub model_warmer: ModelWarmerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,8 +70,8 @@ pub struct RoutingConfig {
     #[serde(default = "default_retry_count")]
     pub retry_count: u32,
 
-    #[serde(default = "default_idle_timeout")]
-    pub idle_timeout_minutes: u64,
+    #[serde(default = "default_keep_alive_value")]
+    pub default_keep_alive: String,
 }
 
 impl Default for RoutingConfig {
@@ -77,7 +80,7 @@ impl Default for RoutingConfig {
             strategy: default_strategy(),
             timeout: default_timeout(),
             retry_count: default_retry_count(),
-            idle_timeout_minutes: default_idle_timeout(),
+            default_keep_alive: default_keep_alive_value(),
         }
     }
 }
@@ -106,8 +109,8 @@ fn default_timeout() -> String {
 fn default_retry_count() -> u32 {
     2
 }
-fn default_idle_timeout() -> u64 {
-    30
+fn default_keep_alive_value() -> String {
+    "-1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,7 +120,7 @@ pub struct Backend {
     pub priority: u32,
 
     #[serde(default)]
-    pub default_model: Option<String>,
+    pub hot_models: Vec<String>,
 
     #[serde(default)]
     pub gpu_hot_url: Option<String>,
@@ -141,7 +144,7 @@ impl Default for Backend {
             name: String::new(),
             url: String::new(),
             priority: 50,
-            default_model: None,
+            hot_models: Vec::new(),
             gpu_hot_url: None,
             model_filter: None,
             health_check_path: None,
@@ -149,6 +152,22 @@ impl Default for Backend {
             tags: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelWarmerConfig {
+    #[serde(default = "default_warmer_interval")]
+    pub interval_secs: u64,
+}
+
+impl Default for ModelWarmerConfig {
+    fn default() -> Self {
+        Self { interval_secs: default_warmer_interval() }
+    }
+}
+
+fn default_warmer_interval() -> u64 {
+    240
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,6 +287,7 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
 #[cfg(test)]
 mod tests {
     use super::parse_duration;
+    use super::Config;
     use std::time::Duration;
 
     #[test]
@@ -281,5 +301,38 @@ mod tests {
     #[test]
     fn parse_duration_millis() {
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn routing_default_keep_alive_is_negative_one() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.routing.default_keep_alive, "-1");
+    }
+
+    #[test]
+    fn routing_keep_alive_configurable() {
+        let yaml = "routing:\n  default_keep_alive: \"1h\"\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.routing.default_keep_alive, "1h");
+    }
+
+    #[test]
+    fn model_warmer_default_interval() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.model_warmer.interval_secs, 240);
+    }
+
+    #[test]
+    fn backend_hot_models_defaults_empty() {
+        let yaml = "backends:\n  - name: x\n    url: http://x\n    priority: 50\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.backends[0].hot_models.is_empty());
+    }
+
+    #[test]
+    fn old_default_model_field_silently_ignored() {
+        let yaml = "backends:\n  - name: x\n    url: http://x\n    priority: 50\n    default_model: llama3:8b\n";
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_ok());
     }
 }

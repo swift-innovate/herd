@@ -14,8 +14,6 @@ pub struct AddBackendRequest {
     #[serde(default = "default_priority")]
     pub priority: u32,
     #[serde(default)]
-    pub default_model: Option<String>,
-    #[serde(default)]
     pub model_filter: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -32,8 +30,6 @@ pub struct UpdateBackendRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_filter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
@@ -44,7 +40,7 @@ pub struct BackendResponse {
     pub name: String,
     pub url: String,
     pub priority: u32,
-    pub default_model: Option<String>,
+    pub hot_models: Vec<String>,
     pub model_filter: Option<String>,
     pub tags: Vec<String>,
     pub healthy: bool,
@@ -68,7 +64,7 @@ fn backend_to_response(b: &crate::backend::BackendState) -> BackendResponse {
         name: b.config.name.clone(),
         url: b.config.url.clone(),
         priority: b.config.priority,
-        default_model: b.config.default_model.clone(),
+        hot_models: b.config.hot_models.clone(),
         model_filter: b.config.model_filter.clone(),
         tags: b.config.tags.clone(),
         healthy: b.healthy,
@@ -122,7 +118,7 @@ pub async fn add_backend(
         name: req.name.clone(),
         url: req.url,
         priority: req.priority,
-        default_model: req.default_model,
+        hot_models: Vec::new(),
         gpu_hot_url: None,
         model_filter: req.model_filter,
         health_check_path: None,
@@ -163,9 +159,6 @@ pub async fn update_backend(
     }
     if let Some(priority) = req.priority {
         backend.config.priority = priority;
-    }
-    if let Some(default_model) = req.default_model {
-        backend.config.default_model = Some(default_model);
     }
     if let Some(model_filter) = req.model_filter {
         backend.config.model_filter = Some(model_filter);

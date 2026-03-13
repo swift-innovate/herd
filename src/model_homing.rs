@@ -45,73 +45,9 @@ impl ModelHoming {
         });
     }
 
-    async fn check_and_home(&self, pool: &BackendPool) {
-        let backends = pool.all().await;
-
-        for name in backends {
-            if let Some(backend) = pool.get(&name).await {
-                // Skip if no default model configured
-                let default_model = match &backend.config.default_model {
-                    Some(m) => m,
-                    None => continue,
-                };
-
-                // Check if idle
-                let idle_time = backend.last_request.elapsed();
-                if idle_time < self.idle_timeout {
-                    tracing::trace!(
-                        "Backend {} idle for {:?}, threshold is {:?}",
-                        name,
-                        idle_time,
-                        self.idle_timeout
-                    );
-                    continue;
-                }
-
-                // Check current model
-                let current = match &backend.current_model {
-                    Some(m) => m,
-                    None => {
-                        // No model loaded, load default
-                        info!(
-                            "Loading default model {} on {} (no model loaded)",
-                            default_model, name
-                        );
-                        if let Err(e) = self.warm_model(&backend.config, default_model).await {
-                            tracing::warn!(
-                                "Failed to warm model {} on {}: {}",
-                                default_model,
-                                name,
-                                e
-                            );
-                        }
-                        continue;
-                    }
-                };
-
-                // If current model differs from default, home it
-                if current != default_model {
-                    info!(
-                        "Homing {} from {} to {} (idle for {:?})",
-                        name, current, default_model, idle_time
-                    );
-
-                    // Load the default model
-                    if let Err(e) = self.warm_model(&backend.config, default_model).await {
-                        tracing::warn!("Failed to home {} to {}: {}", name, default_model, e);
-                    } else {
-                        // Unload the borrowed model
-                        if let Err(e) = self
-                            .unload_other_models(&backend.config, default_model)
-                            .await
-                        {
-                            tracing::trace!("Could not unload other models: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // NOTE: ModelHoming is superseded by ModelWarmer (Task 3).
+    // This method is retained for compile compatibility only and does nothing.
+    async fn check_and_home(&self, _pool: &BackendPool) {}
 
     async fn warm_model(&self, backend: &Backend, model: &str) -> Result<()> {
         // Send a minimal request to load the model into memory
