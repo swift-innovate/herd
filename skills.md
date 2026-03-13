@@ -101,8 +101,7 @@ Returns detailed backend information:
     }
   ],
   "unhealthy_backends": [],
-  "routing_strategy": "ModelAware",
-  "idle_timeout_minutes": 30
+  "routing_strategy": "ModelAware"
 }
 ```
 
@@ -277,11 +276,16 @@ Herd will route to a healthy backend.
 If Herd has rate limiting enabled, you'll receive `429 Too Many Requests` when
 the limit is exceeded. Back off and retry.
 
-## Model Homing
+## Hot Models & keep_alive (v0.4.3+)
 
-Herd automatically loads default models on idle backends. If a backend has
-`default_model: "llama3.1:8b"` configured and sits idle past the timeout,
-Herd sends a request to load that model. This means popular models stay warm.
+Herd keeps models permanently loaded using two mechanisms:
+
+**keep_alive injection:** Every request to `/api/generate` and `/api/chat` gets
+`"keep_alive": "-1"` injected, overriding whatever the client sent. This prevents
+clients like Open WebUI from accidentally evicting models.
+
+**Hot models warmer:** Backends can declare `hot_models` — Herd pings each one
+every 4 minutes with `keep_alive: "-1"` to pre-load on startup and recover from OOM.
 
 ## Quick Reference
 
@@ -364,13 +368,17 @@ routing:
   strategy: "model_aware" # priority | model_aware | least_busy | weighted_round_robin
   timeout: 120s           # Per-request timeout
   retry_count: 2          # Retries on failure
-  idle_timeout_minutes: 30
+  default_keep_alive: "-1" # v0.4.3+: injected into every Ollama request
+
+model_warmer:             # v0.4.3+: replaces model_homing
+  interval_secs: 240      # ping hot_models every 4 min
 
 backends:
   - name: "citadel"
     url: "http://citadel:11434"
     priority: 100
-    default_model: "qwen2.5-coder:32b"
+    hot_models:            # v0.4.3+: replaces default_model
+      - "qwen2.5-coder:32b"
     tags: ["gpu", "fast"]
     model_filter: "qwen|llama"  # Regex: only route matching models
 

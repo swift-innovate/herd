@@ -29,7 +29,8 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Least-busy routing** — Route to lowest GPU utilization
 - **Tag-based routing** — Filter by `X-Herd-Tags` header (new in v0.3.0)
 - **Circuit breaker** — Auto-recover from failed nodes
-- **Model homing** — Auto-load default models on idle nodes
+- **keep_alive injection** — Override `keep_alive` on every Ollama request centrally; prevents clients from accidentally evicting models (new in v0.4.3)
+- **Hot models warmer** — Declare `hot_models` per backend; Herd pre-loads and keeps them warm automatically (new in v0.4.3)
 - **Hot-reload config** — File watcher + `POST /admin/reload` (new in v0.3.0)
 - **Rate limiting** — Global token-bucket rate limiter
 - **OpenAI-compatible** — Drop-in `/v1/chat/completions` endpoint
@@ -103,6 +104,10 @@ routing:
   strategy: "model_aware"  # priority | model_aware | least_busy | weighted_round_robin
   timeout: 120s
   retry_count: 2
+  default_keep_alive: "-1"  # inject into every Ollama request (v0.4.3+)
+
+model_warmer:              # v0.4.3+: replaces model_homing
+  interval_secs: 240       # ping hot_models every 4 min
 
 backends:
   - name: "citadel-5090"
@@ -115,6 +120,8 @@ backends:
   - name: "minipc-4080"
     url: "http://minipc:11434"
     priority: 80
+    hot_models:                # keep these loaded at all times (v0.4.3+)
+      - "glm-4.7-flash:latest"
 
   - name: "warden-4070"
     url: "http://warden:11434"
@@ -266,32 +273,47 @@ On startup, Herd checks for updates in the background and logs a notification if
 
 **Note:** After updating via `--update` or `/admin/update`, the server must be restarted to run the new version. The previous binary is kept as a backup for rollback.
 
-## Model Homing
+## Hot Models & keep_alive (v0.4.3)
 
-Herd keeps idle nodes "warm" by loading their default model after the idle timeout:
+> **⚠️ Breaking change in v0.4.3:** `default_model` and `routing.idle_timeout_minutes` are removed. See the migration guide below.
+
+Herd v0.4.3 solves the model eviction problem centrally. Ollama unloads models after 5 minutes by default, and clients like Open WebUI often send `"keep_alive": "5m"` which overrides any node-level env var. Herd fixes this at the proxy layer.
+
+### keep_alive Injection
+
+Add to `herd.yaml`:
 
 ```yaml
 routing:
-  idle_timeout_minutes: 30
+  default_keep_alive: "-1"   # never unload; set on every Ollama request
+```
+
+Herd injects this into every `/api/generate` and `/api/chat` request body, overriding whatever the client sent. `/v1/*` (OpenAI format) requests are passed through unchanged.
+
+### Hot Models Warmer
+
+```yaml
+model_warmer:
+  interval_secs: 240   # ping every 4 min (default); safely under Ollama's 5-min eviction window
 
 backends:
   - name: "citadel"
     url: "http://citadel:11434"
-    default_model: "glm-4.7-flash:latest"
+    hot_models:
+      - "glm-4.7-flash:latest"
+      - "llama3:8b"
 ```
 
-**How it works:**
-1. When a node sits idle for 30 minutes (no model loaded or running a non-default model)
-2. Herd sends a warmup request to load the default model
-3. Dashboard shows "Homing to default model..." with progress
-4. Once loaded, status shows "✓ Running default model"
+Herd pre-loads declared models on startup and re-loads them after OOM eviction by sending a minimal `keep_alive: "-1"` ping on every interval. No idle timer — models are always warm.
 
-**Important:** After warming, Ollama may unload the model if no requests come in. This is expected - Ollama frees VRAM when idle. Herd will warm it again on the next cycle.
+### Migration from v0.4.2
 
-**Dashboard indicators:**
-- 🟢 "Running default model" — Node is on its default model
-- 🟡 "Returning to default in 25m" — Active model differs from default, timer counting down
-- ⏳ "Homing to default model... 100%" — Warmup request sent, model loading/loaded
+| Before | After |
+|---|---|
+| `backends[].default_model: "model:tag"` | `backends[].hot_models: ["model:tag"]` |
+| `routing.idle_timeout_minutes: 30` | `model_warmer.interval_secs: 240` |
+
+Old config keys are silently ignored after upgrading — **no startup error, but homing stops working**. Update your `herd.yaml` before upgrading.
 
 ## GPU Awareness
 
@@ -379,6 +401,8 @@ Herd will route based on:
 | Priority routing | ✅ | ✅ |
 | Circuit breaker | ✅ | ✅ |
 | Model awareness | ✅ | ❌ |
+| keep_alive injection | ✅ | ❌ |
+| Hot models warmer | ✅ | ❌ |
 | GPU metrics | ✅ | ❌ |
 | Observability API | ✅ | ❌ |
 | Retry with fallback | ✅ | ❌ |

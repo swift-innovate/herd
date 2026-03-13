@@ -47,6 +47,14 @@ No cloud dependency. No API keys exposed. Full local control.
 - ~~GitHub Actions CI/CD~~ ✅ (test on 3 platforms, release builds for 5 targets)
 - ~~Graceful config error handling~~ ✅ (v0.4.1 — warn+disable instead of crash)
 
+### v0.4.3 — Keep-Alive & Hot Models (Breaking)
+
+> **Breaking changes:** `default_model` and `routing.idle_timeout_minutes` are removed. See README migration guide.
+
+- `keep_alive` injection — override `keep_alive` on every proxied Ollama request centrally; prevents clients (Open WebUI, LiteLLM, agents) from accidentally evicting models
+- Hot models warmer — `hot_models: [...]` per backend; background warmer pings every 4 min with `keep_alive: "-1"` for pre-load and OOM recovery
+- Removes `ModelHoming` and `default_model` — superseded by `hot_models` + proxy injection
+
 ### v0.5.0+ — Scale & Ecosystem (Q3 2026)
 
 - Multi-node discovery (mDNS / static fleet config)

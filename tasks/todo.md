@@ -7,17 +7,18 @@
 ## Current Task: Ollama Node Management Features
 
 ### Features
-1. **VRAM probing** — On first backend discovery, pull `llama3.2:3b`, run a small prompt, read VRAM usage from `/api/ps`, store as `vram_total` on BackendState
+1. **VRAM detection** — Passive: on each discovery cycle, read `memory_total` from gpu-hot telemetry (port 1312) and store as `vram_total_mb` on BackendState. Active probe via model pull was discarded (would pull 2GB+ model on every new backend, breaking air-gapped nodes and adding latency).
 2. **Model listing in Edit modal** — Surface all models on the node, with delete buttons (calls Ollama `DELETE /api/delete`)
 3. **Model pull UI** — Text input + "Pull" button in Edit modal, calls Ollama `POST /api/pull` with streaming progress
 
 ### Plan
-- [ ] Add `vram_total_mb` field to BackendState and `vram_probed` flag
-- [ ] Add VRAM probe logic in discovery: pull llama3.2:3b → generate small prompt → read VRAM from /api/ps → store
-- [ ] Add admin API endpoints: `POST /admin/backends/:name/pull`, `DELETE /admin/backends/:name/models/:model`
-- [ ] Update Edit modal in dashboard: show model list with delete buttons, add pull input with progress
-- [ ] Run tests
-- [ ] Commit
+- [x] Add `vram_total_mb` field to BackendState and `vram_populated` flag
+- [x] Populate VRAM passively from gpu-hot telemetry (`memory_total > 0` guard prevents locking in zero on init)
+- [x] Add admin API endpoints: `GET /admin/backends/:name/models`, `POST /admin/backends/:name/pull`, `DELETE /admin/backends/:name/models/:model`
+- [x] `pull_model` uses dedicated `mgmt_client` (1h timeout) — avoids shared client's 120s circuit-breaker timeout silently capping large pulls
+- [x] Update Edit modal in dashboard: show model list with delete buttons, add pull input with progress (DOM-built to prevent XSS)
+- [x] Run tests
+- [x] Commit
 
 ### Ollama API Reference
 - `GET /api/tags` — list models (already used)
@@ -25,6 +26,21 @@
 - `POST /api/pull` — `{"name":"model"}`, streams `{"status":"...","total":N,"completed":N}`
 - `DELETE /api/delete` — `{"name":"model"}`
 - `POST /api/generate` — `{"model":"...","prompt":"..."}` for VRAM test
+
+## Next Task: v0.4.3 — keep_alive Injection + Hot Models Warmer
+
+Spec: `docs/superpowers/specs/2026-03-13-keep-alive-hot-models-design.md`
+
+### Plan
+- [ ] Add `default_keep_alive: String` to `RoutingConfig` (default `"-1"`)
+- [ ] Add `ModelWarmerConfig { interval_secs: u64 }` to `Config` (default 240)
+- [ ] Add `hot_models: Vec<String>` to `Backend`, remove `default_model`
+- [ ] Inject `keep_alive` in proxy_handler for `/api/generate` + `/api/chat`
+- [ ] Write `src/backend/warmer.rs` (ModelWarmer)
+- [ ] Delete `src/model_homing.rs`, remove ModelHoming from server.rs + config.rs
+- [ ] Add 4 unit tests (see spec)
+- [ ] Update skills.md with new config fields
+- [ ] Commit + tag v0.4.3
 
 ## Parked: GitHub Sponsors → Herd-Pro Access
 ## Completed: v0.2.1, v0.3.0, v0.4.0/v0.4.1, v0.4.2
