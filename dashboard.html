@@ -734,16 +734,28 @@ Content-Type: application/json
                     listEl.innerHTML = '<div style="font-size:12px; color:#64748b; padding:8px;">No models on this node</div>';
                     return;
                 }
-                listEl.innerHTML = models.map(m => {
+                listEl.innerHTML = '';
+                for (const m of models) {
                     const sizeGB = m.size ? (m.size / 1e9).toFixed(1) + ' GB' : '';
-                    return `<div class="model-item">
-                        <span class="model-item-name">${m.name}</span>
-                        <span style="display:flex; align-items:center; gap:8px;">
-                            <span class="model-item-size">${sizeGB}</span>
-                            <button class="model-item-delete" onclick="deleteModel('${name}', '${m.name}')" title="Delete">&#x2715;</button>
-                        </span>
-                    </div>`;
-                }).join('');
+                    const item = document.createElement('div');
+                    item.className = 'model-item';
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'model-item-name';
+                    nameSpan.textContent = m.name;
+                    const rightSpan = document.createElement('span');
+                    rightSpan.style.cssText = 'display:flex; align-items:center; gap:8px;';
+                    const sizeSpan = document.createElement('span');
+                    sizeSpan.className = 'model-item-size';
+                    sizeSpan.textContent = sizeGB;
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'model-item-delete';
+                    delBtn.title = 'Delete';
+                    delBtn.innerHTML = '&#x2715;';
+                    delBtn.addEventListener('click', () => deleteModel(name, m.name));
+                    rightSpan.append(sizeSpan, delBtn);
+                    item.append(nameSpan, rightSpan);
+                    listEl.append(item);
+                }
             } catch (e) {
                 listEl.innerHTML = '<div style="font-size:12px; color:#ef4444; padding:8px;">Failed to load models</div>';
             }

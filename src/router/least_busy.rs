@@ -1,6 +1,7 @@
 use crate::backend::BackendPool;
 use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct LeastBusyRouter {
@@ -15,15 +16,16 @@ impl LeastBusyRouter {
 
 #[async_trait]
 impl Router for LeastBusyRouter {
-    async fn route(
+    async fn route_excluding(
         &self,
         _model: Option<&str>,
         tags: Option<&[String]>,
+        excluded: &HashSet<String>,
     ) -> anyhow::Result<RoutedBackend> {
         let backend = if let Some(tags) = tags {
-            self.pool.get_least_busy_tagged(tags).await
+            self.pool.get_least_busy_tagged_excluding(tags, excluded).await
         } else {
-            self.pool.get_least_busy().await
+            self.pool.get_least_busy_excluding(excluded).await
         }
         .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 

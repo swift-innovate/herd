@@ -1,4 +1,5 @@
 use crate::config::Backend;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -14,10 +15,10 @@ pub struct BackendState {
     pub failure_count: u32,
     pub last_check: Instant,
     pub last_request: Instant,
-    /// Total VRAM in MB, detected via probe on first discovery
+    /// Total VRAM in MB, detected passively from backend telemetry when available.
     pub vram_total_mb: Option<u64>,
-    /// Whether VRAM has been probed for this backend
-    pub vram_probed: bool,
+    /// Whether VRAM total has been populated from backend telemetry.
+    pub vram_populated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +51,7 @@ impl BackendPool {
                 last_check: now,
                 last_request: now,
                 vram_total_mb: None,
-                vram_probed: false,
+                vram_populated: false,
             })
             .collect();
 
@@ -89,19 +90,35 @@ impl BackendPool {
     }
 
     pub async fn get_by_priority(&self) -> Option<BackendState> {
+        self.get_by_priority_excluding(&HashSet::new()).await
+    }
+
+    pub async fn get_by_priority_excluding(&self, excluded: &HashSet<String>) -> Option<BackendState> {
         let backends = self.backends.read().await;
         backends
             .iter()
-            .filter(|b| b.healthy)
+            .filter(|b| b.healthy && !excluded.contains(&b.config.name))
             .max_by_key(|b| b.config.priority)
             .cloned()
     }
 
     pub async fn get_by_model(&self, model: &str) -> Option<BackendState> {
+        self.get_by_model_excluding(model, &HashSet::new()).await
+    }
+
+    pub async fn get_by_model_excluding(
+        &self,
+        model: &str,
+        excluded: &HashSet<String>,
+    ) -> Option<BackendState> {
         let backends = self.backends.read().await;
         backends
             .iter()
-            .filter(|b| b.healthy && b.models.contains(&model.to_string()))
+            .filter(|b| {
+                b.healthy
+                    && !excluded.contains(&b.config.name)
+                    && b.models.contains(&model.to_string())
+            })
             .min_by(|a, b| {
                 let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
                 let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
@@ -113,10 +130,17 @@ impl BackendPool {
     }
 
     pub async fn get_least_busy(&self) -> Option<BackendState> {
+        self.get_least_busy_excluding(&HashSet::new()).await
+    }
+
+    pub async fn get_least_busy_excluding(
+        &self,
+        excluded: &HashSet<String>,
+    ) -> Option<BackendState> {
         let backends = self.backends.read().await;
         backends
             .iter()
-            .filter(|b| b.healthy)
+            .filter(|b| b.healthy && !excluded.contains(&b.config.name))
             .min_by(|a, b| {
                 let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
                 let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
@@ -182,20 +206,43 @@ impl BackendPool {
     }
 
     pub async fn get_by_priority_tagged(&self, tags: &[String]) -> Option<BackendState> {
-        let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
-            .max_by_key(|b| b.config.priority)
-            .cloned()
+        self.get_by_priority_tagged_excluding(tags, &HashSet::new()).await
     }
 
-    pub async fn get_by_model_tagged(&self, model: &str, tags: &[String]) -> Option<BackendState> {
+    pub async fn get_by_priority_tagged_excluding(
+        &self,
+        tags: &[String],
+        excluded: &HashSet<String>,
+    ) -> Option<BackendState> {
         let backends = self.backends.read().await;
         backends
             .iter()
             .filter(|b| {
                 b.healthy
+                    && !excluded.contains(&b.config.name)
+                    && tags.iter().all(|t| b.config.tags.contains(t))
+            })
+            .max_by_key(|b| b.config.priority)
+            .cloned()
+    }
+
+    pub async fn get_by_model_tagged(&self, model: &str, tags: &[String]) -> Option<BackendState> {
+        self.get_by_model_tagged_excluding(model, tags, &HashSet::new())
+            .await
+    }
+
+    pub async fn get_by_model_tagged_excluding(
+        &self,
+        model: &str,
+        tags: &[String],
+        excluded: &HashSet<String>,
+    ) -> Option<BackendState> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .filter(|b| {
+                b.healthy
+                    && !excluded.contains(&b.config.name)
                     && b.models.contains(&model.to_string())
                     && tags.iter().all(|t| b.config.tags.contains(t))
             })
@@ -210,10 +257,23 @@ impl BackendPool {
     }
 
     pub async fn get_least_busy_tagged(&self, tags: &[String]) -> Option<BackendState> {
+        self.get_least_busy_tagged_excluding(tags, &HashSet::new())
+            .await
+    }
+
+    pub async fn get_least_busy_tagged_excluding(
+        &self,
+        tags: &[String],
+        excluded: &HashSet<String>,
+    ) -> Option<BackendState> {
         let backends = self.backends.read().await;
         backends
             .iter()
-            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
+            .filter(|b| {
+                b.healthy
+                    && !excluded.contains(&b.config.name)
+                    && tags.iter().all(|t| b.config.tags.contains(t))
+            })
             .min_by(|a, b| {
                 let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
                 let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
@@ -235,14 +295,14 @@ impl BackendPool {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
             backend.vram_total_mb = Some(vram_mb);
-            backend.vram_probed = true;
+            backend.vram_populated = true;
         }
     }
 
-    pub async fn mark_vram_probed(&self, name: &str) {
+    pub async fn mark_vram_populated(&self, name: &str) {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
-            backend.vram_probed = true;
+            backend.vram_populated = true;
         }
     }
 
@@ -258,7 +318,7 @@ impl BackendPool {
             last_check: Instant::now(),
             last_request: Instant::now(),
             vram_total_mb: None,
-            vram_probed: false,
+            vram_populated: false,
         });
     }
 
@@ -284,6 +344,7 @@ impl BackendPool {
 mod tests {
     use super::*;
     use crate::config::Backend;
+    use std::collections::HashSet;
     use std::time::Duration;
 
     fn make_backend(name: &str, priority: u32) -> Backend {
@@ -462,5 +523,18 @@ mod tests {
         assert_eq!(both, vec!["a"]);
         let none = pool.get_healthy_with_tags(&["nonexistent".into()]).await;
         assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn excluded_backends_are_skipped() {
+        let pool = BackendPool::new(
+            vec![make_backend("high", 100), make_backend("low", 50)],
+            3,
+            Duration::from_secs(60),
+        );
+        let excluded = HashSet::from([String::from("high")]);
+
+        let selected = pool.get_by_priority_excluding(&excluded).await.unwrap();
+        assert_eq!(selected.config.name, "low");
     }
 }

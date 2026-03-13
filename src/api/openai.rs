@@ -4,6 +4,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 /// GET /v1/models — OpenAI-compatible model listing.
 /// Aggregates unique model names from all healthy backends.
@@ -75,28 +76,6 @@ pub async fn chat_completions(
                 .collect()
         });
 
-    // Route to backend based on model and tags
-    let backend = state
-        .router
-        .read()
-        .await
-        .route(model_name.as_deref(), tags.as_deref())
-        .await
-        .map_err(|_| {
-            openai_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                &format!(
-                    "No healthy backend available{}",
-                    model_name
-                        .as_deref()
-                        .map(|m| format!(" for model '{}'", m))
-                        .unwrap_or_default()
-                ),
-            )
-        })?;
-
-    state.pool.touch_request(&backend.name).await;
-
     // Preserve query string if present
     let path_and_query = parts
         .uri
@@ -104,44 +83,85 @@ pub async fn chat_completions(
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| "/v1/chat/completions".to_string());
 
-    let url = format!("{}{}", backend.url.trim_end_matches('/'), path_and_query);
-
-    // Build proxied request with header forwarding
     let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes())
         .unwrap_or(reqwest::Method::POST);
+    let mut response = None;
+    let mut selected_backend = None;
+    let mut excluded = HashSet::new();
 
-    let mut req_builder = state
-        .client
-        .request(method, &url)
-        .timeout(state.routing_timeout())
-        .body(body_bytes.clone());
+    for _ in 0..=state.retry_count() {
+        let backend = state
+            .router
+            .read()
+            .await
+            .route_excluding(model_name.as_deref(), tags.as_deref(), &excluded)
+            .await
+            .map_err(|_| {
+                openai_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    &format!(
+                        "No healthy backend available{}",
+                        model_name
+                            .as_deref()
+                            .map(|m| format!(" for model '{}'", m))
+                            .unwrap_or_default()
+                    ),
+                )
+            })?;
 
-    for (name, value) in &headers {
-        if name == axum::http::header::HOST || name == axum::http::header::CONTENT_LENGTH {
-            continue;
+        state.pool.touch_request(&backend.name).await;
+        selected_backend = Some(backend.name.clone());
+
+        let url = format!("{}{}", backend.url.trim_end_matches('/'), path_and_query);
+        let mut req_builder = state
+            .client
+            .request(method.clone(), &url)
+            .timeout(state.routing_timeout())
+            .body(body_bytes.clone());
+
+        for (name, value) in &headers {
+            if name == axum::http::header::HOST || name == axum::http::header::CONTENT_LENGTH {
+                continue;
+            }
+            if let (Ok(rn), Ok(rv)) = (
+                reqwest::header::HeaderName::from_bytes(name.as_ref()),
+                reqwest::header::HeaderValue::from_bytes(value.as_ref()),
+            ) {
+                req_builder = req_builder.header(rn, rv);
+            }
         }
-        if let (Ok(rn), Ok(rv)) = (
-            reqwest::header::HeaderName::from_bytes(name.as_ref()),
-            reqwest::header::HeaderValue::from_bytes(value.as_ref()),
-        ) {
-            req_builder = req_builder.header(rn, rv);
+
+        match req_builder.send().await {
+            Ok(r) => {
+                if r.status().as_u16() == 404 {
+                    tracing::warn!(
+                        "Backend {} returned 404 for /v1/chat/completions, retrying",
+                        backend.name
+                    );
+                    excluded.insert(backend.name.clone());
+                    continue;
+                }
+
+                state.pool.mark_healthy(&backend.name).await;
+                response = Some(r);
+                break;
+            }
+            Err(e) => {
+                tracing::error!("Upstream request to {} failed: {}", url, e);
+                state.pool.mark_unhealthy(&backend.name).await;
+                excluded.insert(backend.name.clone());
+            }
         }
     }
 
-    let response = match req_builder.send().await {
-        Ok(r) => {
-            state.pool.mark_healthy(&backend.name).await;
-            r
-        }
-        Err(e) => {
-            tracing::error!("Upstream request to {} failed: {}", url, e);
-            state.pool.mark_unhealthy(&backend.name).await;
-
+    let response = match response {
+        Some(response) => response,
+        None => {
             let duration = start.elapsed();
             let log = crate::analytics::RequestLog {
                 timestamp: chrono::Utc::now().timestamp(),
                 model: model_name,
-                backend: backend.name.clone(),
+                backend: selected_backend.unwrap_or_else(|| "none".to_string()),
                 duration_ms: duration.as_millis() as u64,
                 status: "error".to_string(),
                 path: "/v1/chat/completions".to_string(),
@@ -155,7 +175,7 @@ pub async fn chat_completions(
 
             return Err(openai_error(
                 StatusCode::BAD_GATEWAY,
-                &format!("Backend '{}' unreachable: {}", backend.name, e),
+                "All candidate backends failed for /v1/chat/completions",
             ));
         }
     };
@@ -170,7 +190,7 @@ pub async fn chat_completions(
     let log = crate::analytics::RequestLog {
         timestamp: chrono::Utc::now().timestamp(),
         model: model_name,
-        backend: backend.name.clone(),
+        backend: selected_backend.unwrap_or_else(|| "none".to_string()),
         duration_ms: duration.as_millis() as u64,
         status: status.to_string(),
         path: "/v1/chat/completions".to_string(),

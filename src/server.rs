@@ -6,6 +6,7 @@ use crate::model_homing::ModelHoming;
 use crate::router::{create_router, Router};
 use anyhow::Result;
 use chrono::Timelike;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,7 +29,9 @@ pub struct AppState {
     pub pool: Arc<BackendPool>,
     pub router: Arc<tokio::sync::RwLock<crate::router::RouterEnum>>,
     pub client: Arc<reqwest::Client>,
-    pub config: Config,
+    /// Long-timeout client for management operations (e.g. model pulls).
+    pub mgmt_client: Arc<reqwest::Client>,
+    pub config: Arc<tokio::sync::RwLock<Config>>,
     pub analytics: Arc<Analytics>,
     pub metrics: Arc<crate::metrics::Metrics>,
     pub routing_timeout_ms: Arc<AtomicU64>,
@@ -43,6 +46,10 @@ impl AppState {
 
     pub fn retry_count(&self) -> u32 {
         self.routing_retry_count.load(Ordering::Relaxed)
+    }
+
+    pub async fn config_snapshot(&self) -> Config {
+        self.config.read().await.clone()
     }
 
     pub async fn reload_config(&self) -> anyhow::Result<String> {
@@ -89,6 +96,7 @@ impl AppState {
             .store(new_timeout.as_millis() as u64, Ordering::Relaxed);
         self.routing_retry_count
             .store(new_config.routing.retry_count, Ordering::Relaxed);
+        *self.config.write().await = new_config.clone();
 
         let msg = format!(
             "Reloaded: {} backends, strategy={:?}",
@@ -207,12 +215,18 @@ impl Server {
                 .timeout(circuit_timeout)
                 .build()?,
         );
+        let mgmt_client = Arc::new(
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(3600))
+                .build()?,
+        );
 
         let state = AppState {
             pool: Arc::clone(&pool),
             router: Arc::new(tokio::sync::RwLock::new(router)),
             client: Arc::clone(&client),
-            config: self.config.clone(),
+            mgmt_client,
+            config: Arc::new(tokio::sync::RwLock::new(self.config.clone())),
             analytics,
             metrics,
             routing_timeout_ms: Arc::new(AtomicU64::new(routing_timeout.as_millis() as u64)),
@@ -430,7 +444,7 @@ pub async fn require_api_key(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, axum::http::StatusCode> {
-    let expected = match &state.config.server.api_key {
+    let expected = match state.config.read().await.server.api_key.clone() {
         Some(key) => key,
         None => return Ok(next.run(req).await), // no key configured = allow
     };
@@ -539,13 +553,14 @@ async fn proxy_handler(
     // Retry loop: try routing to different backends on failure
     let mut response = None;
     let mut selected_backend: Option<String> = None;
+    let mut excluded = HashSet::new();
 
     for _ in 0..=state.retry_count() {
         let backend = state
             .router
             .read()
             .await
-            .route(model_name.as_deref(), tags.as_deref())
+            .route_excluding(model_name.as_deref(), tags.as_deref(), &excluded)
             .await
             .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -575,6 +590,7 @@ async fn proxy_handler(
                         backend.name,
                         path
                     );
+                    excluded.insert(backend.name.clone());
                     continue;
                 }
 
@@ -590,6 +606,7 @@ async fn proxy_handler(
                     e
                 );
                 state.pool.mark_unhealthy(&backend.name).await;
+                excluded.insert(backend.name.clone());
             }
         }
     }
@@ -668,6 +685,7 @@ async fn proxy_handler(
 async fn status_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> axum::Json<serde_json::Value> {
+    let config = state.config_snapshot().await;
     let all = state.pool.all().await;
     let mut healthy = Vec::new();
     let mut unhealthy = Vec::new();
@@ -708,8 +726,8 @@ async fn status_handler(
     axum::Json(serde_json::json!({
         "healthy_backends": healthy,
         "unhealthy_backends": unhealthy,
-        "routing_strategy": format!("{:?}", state.config.routing.strategy),
-        "idle_timeout_minutes": state.config.routing.idle_timeout_minutes,
+        "routing_strategy": format!("{:?}", config.routing.strategy),
+        "idle_timeout_minutes": config.routing.idle_timeout_minutes,
     }))
 }
 
@@ -935,7 +953,8 @@ async fn gpu_handler(
 async fn skills_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> axum::Json<serde_json::Value> {
-    let strategy = format!("{:?}", state.config.routing.strategy);
+    let config = state.config_snapshot().await;
+    let strategy = format!("{:?}", config.routing.strategy);
 
     axum::Json(serde_json::json!({
         "herd_version": env!("CARGO_PKG_VERSION"),
@@ -1028,4 +1047,88 @@ async fn skills_md_handler() -> ([(axum::http::header::HeaderName, &'static str)
 pub async fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
     let server = Server::new(config, config_path);
     server.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Backend, RoutingStrategy};
+
+    fn make_backend(name: &str, url: &str, priority: u32) -> Backend {
+        Backend {
+            name: name.into(),
+            url: url.into(),
+            priority,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_config_updates_live_state() {
+        let initial = Config {
+            server: crate::config::ServerConfig {
+                api_key: Some("old-key".into()),
+                ..Default::default()
+            },
+            routing: crate::config::RoutingConfig {
+                strategy: RoutingStrategy::Priority,
+                retry_count: 1,
+                ..Default::default()
+            },
+            backends: vec![make_backend("old", "http://old:11434", 100)],
+            ..Default::default()
+        };
+
+        let updated = Config {
+            server: crate::config::ServerConfig {
+                api_key: Some("new-key".into()),
+                ..Default::default()
+            },
+            routing: crate::config::RoutingConfig {
+                strategy: RoutingStrategy::LeastBusy,
+                retry_count: 4,
+                ..Default::default()
+            },
+            backends: vec![make_backend("new", "http://new:11434", 10)],
+            ..Default::default()
+        };
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "herd-reload-test-{}-{}.yaml",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::write(&temp_path, updated.to_yaml().unwrap()).unwrap();
+
+        let pool = Arc::new(BackendPool::new(
+            initial.backends.clone(),
+            initial.circuit_breaker.failure_threshold,
+            parse_duration(&initial.circuit_breaker.recovery_time).unwrap(),
+        ));
+        let router = create_router(initial.routing.strategy.clone(), (*pool).clone());
+
+        let state = AppState {
+            pool,
+            router: Arc::new(tokio::sync::RwLock::new(router)),
+            client: Arc::new(reqwest::Client::new()),
+            mgmt_client: Arc::new(reqwest::Client::new()),
+            config: Arc::new(tokio::sync::RwLock::new(initial)),
+            analytics: Arc::new(Analytics::new().unwrap()),
+            metrics: Arc::new(crate::metrics::Metrics::new()),
+            routing_timeout_ms: Arc::new(AtomicU64::new(1_000)),
+            routing_retry_count: Arc::new(AtomicU32::new(1)),
+            config_path: Some(temp_path.clone()),
+        };
+
+        let message = state.reload_config().await.unwrap();
+        let snapshot = state.config_snapshot().await;
+
+        assert!(message.contains("LeastBusy"));
+        assert_eq!(snapshot.server.api_key.as_deref(), Some("new-key"));
+        assert_eq!(snapshot.routing.strategy, RoutingStrategy::LeastBusy);
+        assert_eq!(state.retry_count(), 4);
+        assert_eq!(state.pool.all().await, vec![String::from("new")]);
+
+        let _ = std::fs::remove_file(temp_path);
+    }
 }

@@ -1,6 +1,7 @@
 use crate::backend::BackendPool;
 use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct ModelAwareRouter {
@@ -15,17 +16,20 @@ impl ModelAwareRouter {
 
 #[async_trait]
 impl Router for ModelAwareRouter {
-    async fn route(
+    async fn route_excluding(
         &self,
         model: Option<&str>,
         tags: Option<&[String]>,
+        excluded: &HashSet<String>,
     ) -> anyhow::Result<RoutedBackend> {
         // If model specified, try to find backend with model loaded
         if let Some(model_name) = model {
             let backend = if let Some(tags) = tags {
-                self.pool.get_by_model_tagged(model_name, tags).await
+                self.pool
+                    .get_by_model_tagged_excluding(model_name, tags, excluded)
+                    .await
             } else {
-                self.pool.get_by_model(model_name).await
+                self.pool.get_by_model_excluding(model_name, excluded).await
             };
             if let Some(backend) = backend {
                 tracing::debug!(
@@ -42,9 +46,9 @@ impl Router for ModelAwareRouter {
 
         // Fall back to highest priority healthy backend
         let backend = if let Some(tags) = tags {
-            self.pool.get_by_priority_tagged(tags).await
+            self.pool.get_by_priority_tagged_excluding(tags, excluded).await
         } else {
-            self.pool.get_by_priority().await
+            self.pool.get_by_priority_excluding(excluded).await
         }
         .ok_or_else(|| anyhow::anyhow!("No healthy backends available"))?;
 

@@ -136,7 +136,7 @@ impl Analytics {
     /// Rotates the log file if it exceeds max_size_mb.
     /// Keeps up to max_files rotated files (.1, .2, etc.)
     pub async fn rotate_if_needed(&self, max_size_mb: u64, max_files: u32) -> Result<bool> {
-        if max_size_mb == 0 {
+        if max_size_mb == 0 || max_files == 0 {
             return Ok(false); // rotation disabled
         }
 
@@ -175,6 +175,9 @@ impl Analytics {
 
         // Current → .1
         let rotated = self.log_path.with_extension("jsonl.1");
+        if rotated.exists() {
+            let _ = std::fs::remove_file(&rotated);
+        }
         std::fs::rename(&self.log_path, &rotated)?;
 
         // Create fresh empty log file
@@ -217,10 +220,18 @@ impl Analytics {
         }
 
         temp_file.flush()?;
-        std::fs::rename(temp_path, &self.log_path)?;
+        replace_file(&temp_path, &self.log_path)?;
 
         Ok(removed)
     }
+}
+
+fn replace_file(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
+    if to.exists() {
+        std::fs::remove_file(to)?;
+    }
+    std::fs::rename(from, to)?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -237,6 +248,7 @@ pub struct AnalyticsStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn request_log_with_request_id_serializes() {
@@ -296,5 +308,27 @@ mod tests {
         assert_eq!(config.log_retention_days, 14);
         assert_eq!(config.log_max_size_mb, 50);
         assert_eq!(config.log_max_files, 3);
+    }
+
+    #[test]
+    fn replace_file_overwrites_destination() {
+        let base = std::env::temp_dir().join(format!(
+            "herd-analytics-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&base);
+        let from = base.join("from.txt");
+        let to = base.join("to.txt");
+
+        std::fs::write(&from, "new").unwrap();
+        std::fs::write(&to, "old").unwrap();
+
+        replace_file(Path::new(&from), Path::new(&to)).unwrap();
+
+        assert!(!from.exists());
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
+
+        let _ = std::fs::remove_file(&to);
+        let _ = std::fs::remove_dir(&base);
     }
 }
