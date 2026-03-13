@@ -218,12 +218,11 @@ pub async fn pull_model(
     let url = format!("{}/api/pull", backend.config.url.trim_end_matches('/'));
     tracing::info!("Pulling model '{}' on backend '{}'", req.name, name);
 
-    // Stream the pull response from Ollama
+    // Stream the pull response from Ollama (uses mgmt_client with 1-hour timeout)
     let resp = state
-        .client
+        .mgmt_client
         .post(&url)
         .json(&serde_json::json!({"name": req.name, "stream": true}))
-        .timeout(std::time::Duration::from_secs(3600)) // 1 hour for large models
         .send()
         .await
         .map_err(|e| {
@@ -295,9 +294,6 @@ pub async fn delete_model(
             format!("Ollama delete failed ({}): {}", status, body),
         ));
     }
-
-    // Refresh model list after deletion
-    let _ = resp.text().await;
 
     tracing::info!("Deleted model '{}' from backend '{}'", model, name);
     Ok(Json(serde_json::json!({

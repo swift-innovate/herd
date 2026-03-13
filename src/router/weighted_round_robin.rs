@@ -1,6 +1,7 @@
 use crate::backend::BackendPool;
 use crate::router::{RoutedBackend, Router};
 use async_trait::async_trait;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -21,16 +22,19 @@ impl WeightedRoundRobinRouter {
 
 #[async_trait]
 impl Router for WeightedRoundRobinRouter {
-    async fn route(
+    async fn route_excluding(
         &self,
         _model: Option<&str>,
         tags: Option<&[String]>,
+        excluded: &HashSet<String>,
     ) -> anyhow::Result<RoutedBackend> {
         let backends = self.pool.backends.read().await;
         let healthy: Vec<_> = backends
             .iter()
             .filter(|b| {
-                b.healthy && tags.is_none_or(|t| t.iter().all(|tag| b.config.tags.contains(tag)))
+                b.healthy
+                    && !excluded.contains(&b.config.name)
+                    && tags.is_none_or(|t| t.iter().all(|tag| b.config.tags.contains(tag)))
             })
             .collect();
 
