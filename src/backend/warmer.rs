@@ -56,10 +56,12 @@ pub fn warm_url(base_url: &str) -> String {
 }
 
 pub fn warm_payload(model: &str) -> serde_json::Value {
+    // Use integer -1 (not string "-1") — older Ollama rejects the string form
+    // as time.ParseDuration doesn't special-case "-1" without a unit.
     serde_json::json!({
         "model": model,
         "prompt": "",
-        "keep_alive": "-1"
+        "keep_alive": -1
     })
 }
 
@@ -77,7 +79,7 @@ mod tests {
     fn warm_payload_contains_keep_alive() {
         let payload = warm_payload("llama3:8b");
         assert_eq!(payload["model"], "llama3:8b");
-        assert_eq!(payload["keep_alive"], "-1");
+        assert_eq!(payload["keep_alive"], -1);
         assert_eq!(payload["prompt"], "");
     }
 }

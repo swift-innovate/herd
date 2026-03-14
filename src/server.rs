@@ -496,7 +496,15 @@ fn inject_keep_alive(body: &[u8], path: &str, keep_alive: &str) -> axum::body::B
         return axum::body::Bytes::copy_from_slice(body);
     };
     if let Some(obj) = payload.as_object_mut() {
-        obj.insert("keep_alive".to_string(), serde_json::Value::String(keep_alive.to_string()));
+        // Inject as integer when keep_alive is a bare number (e.g. "-1", "300")
+        // so all Ollama versions accept it. Older Ollama rejects "-1" as a string
+        // because time.ParseDuration doesn't special-case it.
+        let value = if let Ok(n) = keep_alive.parse::<i64>() {
+            serde_json::Value::Number(serde_json::Number::from(n))
+        } else {
+            serde_json::Value::String(keep_alive.to_string())
+        };
+        obj.insert("keep_alive".to_string(), value);
     }
     match serde_json::to_vec(&payload) {
         Ok(modified) => axum::body::Bytes::from(modified),
@@ -1161,7 +1169,7 @@ mod tests {
         let bytes = serde_json::to_vec(&body).unwrap();
         let result = inject_keep_alive(&bytes, "/api/generate", "-1");
         let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
-        assert_eq!(parsed["keep_alive"], "-1");
+        assert_eq!(parsed["keep_alive"], -1);
         assert_eq!(parsed["model"], "llama3");
     }
 
@@ -1171,7 +1179,7 @@ mod tests {
         let bytes = serde_json::to_vec(&body).unwrap();
         let result = inject_keep_alive(&bytes, "/api/chat", "-1");
         let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
-        assert_eq!(parsed["keep_alive"], "-1");
+        assert_eq!(parsed["keep_alive"], -1);
     }
 
     #[test]
@@ -1189,7 +1197,7 @@ mod tests {
         let bytes = serde_json::to_vec(&body).unwrap();
         let result = inject_keep_alive(&bytes, "/api/generate", "-1");
         let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
-        assert_eq!(parsed["keep_alive"], "-1");
+        assert_eq!(parsed["keep_alive"], -1);
     }
 
     #[test]
