@@ -466,10 +466,13 @@ fn copy_request_headers(
 ) -> reqwest::RequestBuilder {
     let mut builder = builder;
     for (name, value) in src.iter() {
-        // Skip host and connection-level headers
+        // Skip hop-by-hop and framing headers. Content-Length is re-computed
+        // by reqwest from the actual body — forwarding the original value would
+        // send a wrong length after inject_keep_alive modifies the body.
         if name == axum::http::header::HOST
             || name == axum::http::header::CONNECTION
             || name == axum::http::header::TRANSFER_ENCODING
+            || name == axum::http::header::CONTENT_LENGTH
         {
             continue;
         }
