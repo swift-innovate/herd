@@ -23,10 +23,10 @@ All examples below assume this base URL.
 
 ## Endpoints You Should Use
 
-### Chat Completions (OpenAI-compatible)
+### Chat — Native Ollama (Recommended)
 
 ```
-POST /v1/chat/completions
+POST /api/chat
 Content-Type: application/json
 ```
 
@@ -41,9 +41,23 @@ Content-Type: application/json
 }
 ```
 
+- **This is the preferred endpoint.** It goes directly to Ollama's native chat API and works reliably with all models.
 - **Streaming:** Set `"stream": true` for SSE streaming (recommended for long responses).
-- **Model:** Always specify the model you need. Herd uses this to route to a backend that already has it loaded, avoiding cold-start model loading.
-- **Response format:** Identical to OpenAI's API. Your existing OpenAI client libraries work unchanged.
+- **Model:** Always specify the model you need. Herd uses this to route to a backend that already has it loaded.
+
+### Chat Completions (OpenAI-compatible)
+
+```
+POST /v1/chat/completions
+Content-Type: application/json
+```
+
+Use this only if you need OpenAI client library compatibility. It forwards to Ollama's OpenAI compatibility layer on the backend.
+
+> **Warning:** Some models with custom chat templates (e.g. GLM, some Qwen variants) may hang or fail on this endpoint while working correctly on `/api/chat`. If you see timeouts or unexpected errors, switch to `/api/chat`.
+
+- **Response format:** Identical to OpenAI's API. Existing OpenAI client libraries work unchanged.
+- **keep_alive:** Not injected on `/v1/*` paths. Use `/api/chat` or `/api/generate` if you need Herd's `keep_alive` injection.
 
 ### List Available Models
 
@@ -195,7 +209,22 @@ Check `GET /status` → `routing_strategy` to see which is active.
 
 ## Best Practices for Agents
 
-### 1. Always specify the model
+### 1. Use native Ollama endpoints
+
+```
+POST /api/chat       ← preferred for chat
+POST /api/generate   ← preferred for single-turn generation
+```
+
+`/api/chat` and `/api/generate` go directly to Ollama's native API. They work
+reliably with **all** models and receive Herd's `keep_alive` injection.
+
+`/v1/chat/completions` routes through Ollama's OpenAI compatibility layer.
+Most models work, but models with custom chat templates (GLM, some Qwen variants)
+may hang or fail. Only use `/v1/chat/completions` when you need OpenAI client
+library compatibility and have confirmed the model supports it.
+
+### 2. Always specify the model
 
 ```json
 {"model": "qwen2.5-coder:32b", "messages": [...]}
@@ -204,7 +233,7 @@ Check `GET /status` → `routing_strategy` to see which is active.
 Without a model, Herd can't do model-aware routing and may route you to a backend
 that needs to cold-load the model (slow).
 
-### 2. Use streaming for long responses
+### 3. Use streaming for long responses
 
 ```json
 {"stream": true}
@@ -212,7 +241,7 @@ that needs to cold-load the model (slow).
 
 Streaming prevents timeout issues on long generations and gives you incremental output.
 
-### 3. Discover models before requesting
+### 4. Discover models before requesting
 
 ```bash
 GET /v1/models
@@ -220,7 +249,7 @@ GET /v1/models
 
 Don't guess model names. Query available models first to avoid 404s from Ollama.
 
-### 4. Use tags for workload isolation
+### 5. Use tags for workload isolation
 
 If your Herd instance has tagged backends:
 
@@ -230,7 +259,7 @@ X-Herd-Tags: fast
 
 This ensures your request goes to a backend suited for your workload type.
 
-### 5. Handle 503 gracefully
+### 6. Handle 503 gracefully
 
 A `503 Service Unavailable` means no healthy backend could serve your request.
 This can happen when:
@@ -240,7 +269,7 @@ This can happen when:
 
 **Retry after a few seconds.** Herd's circuit breaker automatically recovers backends.
 
-### 6. Handle 502 gracefully
+### 7. Handle 502 gracefully
 
 A `502 Bad Gateway` means Herd reached a backend but it failed. The response includes
 a `request_id` for debugging:
@@ -249,12 +278,12 @@ a `request_id` for debugging:
 {"error": "Bad Gateway", "request_id": "abc-123-def"}
 ```
 
-### 7. Don't hard-code backend URLs
+### 8. Don't hard-code backend URLs
 
 Always go through Herd. Never bypass it to talk to individual Ollama instances.
 Herd handles failover, load balancing, and model routing — bypassing it defeats the purpose.
 
-### 8. Send correlation IDs for traceability
+### 9. Send correlation IDs for traceability
 
 ```
 X-Request-Id: agent-task-42-step-3
@@ -290,21 +319,21 @@ every 4 minutes with `keep_alive: "-1"` to pre-load on startup and recover from 
 
 ## Quick Reference
 
-| Action | Method | Endpoint |
-|--------|--------|----------|
-| Chat (OpenAI) | POST | `/v1/chat/completions` |
-| List models | GET | `/v1/models` |
-| Health check | GET | `/health` |
-| Cluster status | GET | `/status` |
-| GPU metrics | GET | `/gpu` |
-| Analytics | GET | `/analytics?hours=24` |
-| Prometheus | GET | `/metrics` |
-| Update check | GET | `/update` |
-| Ollama generate | POST | `/api/generate` |
-| Ollama chat | POST | `/api/chat` |
-| Ollama models | GET | `/api/tags` |
-| Dashboard | GET | `/dashboard` |
-| Skills (this data as JSON) | GET | `/skills` |
+| Action | Method | Endpoint | Notes |
+|--------|--------|----------|-------|
+| **Chat (native — recommended)** | POST | `/api/chat` | Works with all models |
+| **Generate (native — recommended)** | POST | `/api/generate` | Works with all models |
+| Chat (OpenAI compat) | POST | `/v1/chat/completions` | Some models may not support |
+| List models (OpenAI format) | GET | `/v1/models` | |
+| List models (Ollama native) | GET | `/api/tags` | |
+| Health check | GET | `/health` | |
+| Cluster status | GET | `/status` | |
+| GPU metrics | GET | `/gpu` | |
+| Analytics | GET | `/analytics?hours=24` | |
+| Prometheus | GET | `/metrics` | |
+| Update check | GET | `/update` | |
+| Dashboard | GET | `/dashboard` | |
+| Skills (this data as JSON) | GET | `/skills` | |
 
 ## Self-Onboarding
 
@@ -332,9 +361,9 @@ print(f"Available: {available}")
 # 2. Pick the best model for the task
 model = "qwen2.5-coder:32b" if "qwen2.5-coder:32b" in available else available[0]
 
-# 3. Send a chat request with correlation ID
+# 3. Send a chat request using the native Ollama endpoint (recommended)
 response = requests.post(
-    f"{HERD}/v1/chat/completions",
+    f"{HERD}/api/chat",
     headers={
         "X-Request-Id": "agent-session-001",
         "X-Herd-Tags": "gpu",
@@ -351,7 +380,10 @@ response = requests.post(
 
 # 4. Use the response
 result = response.json()
-print(result["choices"][0]["message"]["content"])
+print(result["message"]["content"])
+
+# Note: if you need OpenAI client library compatibility, use /v1/chat/completions instead.
+# Most models work, but some (GLM, certain Qwen variants) require the native /api/chat.
 ```
 
 ## Configuration Reference (for operators)

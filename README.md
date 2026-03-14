@@ -89,6 +89,7 @@ curl http://herd:40114/skills | jq .best_practices
 3. Send `X-Herd-Tags` to target specific backends
 4. Send `X-Request-Id` for traceability across distributed systems
 5. Query `GET /v1/models` to discover available models before requesting
+6. Prefer native Ollama endpoints (`/api/chat`, `/api/generate`) over `/v1/chat/completions` — Herd routes both identically, but the native endpoints bypass Ollama's OpenAI compat layer and work reliably with all models
 
 ## Configuration
 
@@ -160,6 +161,8 @@ api_key: anything   # Ollama doesn't require auth; any value works
 | `POST /v1/completions` | Text completions (streaming supported) |
 
 All `/v1/*` requests use the same intelligent routing as native Ollama calls — model-aware, priority-based, with circuit breakers.
+
+> **Note:** `/v1/chat/completions` is forwarded to Ollama's OpenAI compatibility layer on the backend. Most models work fine, but some models (particularly those with custom chat templates like GLM) may hang or return errors on this endpoint while working correctly on native `/api/chat`. If a model behaves unexpectedly via `/v1/chat/completions`, switch to `/api/chat` — Herd proxies it identically, with full routing and circuit-breaker support.
 
 ### Correlation IDs
 
