@@ -1,6 +1,10 @@
 use crate::backend::BackendPool;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tokio::time::interval;
+
+const MAX_CONCURRENT_WARMUPS: usize = 20;
 
 pub struct ModelWarmer {
     interval: Duration,
@@ -29,6 +33,7 @@ impl ModelWarmer {
     }
 
     async fn warm_all(&self, pool: &BackendPool) {
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_WARMUPS));
         let backends = pool.all().await;
         for name in backends {
             if let Some(state) = pool.get(&name).await {
@@ -38,7 +43,9 @@ impl ModelWarmer {
                     let client = self.client.clone();
                     let model = model.clone();
                     let name = name.clone();
+                    let permit = semaphore.clone();
                     tokio::spawn(async move {
+                        let _permit = permit.acquire().await.expect("semaphore closed");
                         if let Err(e) = client.post(&url).json(&payload).send().await {
                             tracing::warn!("Warmer failed for {} on {}: {}", model, name, e);
                         } else {

@@ -93,6 +93,8 @@ async fn main() -> anyhow::Result<()> {
         (config, None)
     };
 
+    config.validate()?;
+
     tracing::info!(
         "Starting Herd on {}:{} with {} backends",
         config.server.host,

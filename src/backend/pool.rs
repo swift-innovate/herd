@@ -36,6 +36,27 @@ pub struct BackendPool {
     recovery_time: Duration,
 }
 
+fn filter_healthy<'a>(
+    backends: &'a [BackendState],
+    excluded: &HashSet<String>,
+    tags: &[String],
+) -> Vec<&'a BackendState> {
+    backends
+        .iter()
+        .filter(|b| {
+            b.healthy
+                && !excluded.contains(&b.config.name)
+                && tags.iter().all(|t| b.config.tags.contains(t))
+        })
+        .collect()
+}
+
+fn least_busy_cmp(a: &&BackendState, b: &&BackendState) -> std::cmp::Ordering {
+    let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+    let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
+    a_busy.partial_cmp(&b_busy).unwrap_or(std::cmp::Ordering::Equal)
+}
+
 impl BackendPool {
     pub fn new(backends: Vec<Backend>, failure_threshold: u32, recovery_time: Duration) -> Self {
         let now = Instant::now();
@@ -94,12 +115,7 @@ impl BackendPool {
     }
 
     pub async fn get_by_priority_excluding(&self, excluded: &HashSet<String>) -> Option<BackendState> {
-        let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| b.healthy && !excluded.contains(&b.config.name))
-            .max_by_key(|b| b.config.priority)
-            .cloned()
+        self.get_by_priority_tagged_excluding(&[], excluded).await
     }
 
     pub async fn get_by_model(&self, model: &str) -> Option<BackendState> {
@@ -111,22 +127,7 @@ impl BackendPool {
         model: &str,
         excluded: &HashSet<String>,
     ) -> Option<BackendState> {
-        let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| {
-                b.healthy
-                    && !excluded.contains(&b.config.name)
-                    && b.models.contains(&model.to_string())
-            })
-            .min_by(|a, b| {
-                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                a_busy
-                    .partial_cmp(&b_busy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .cloned()
+        self.get_by_model_tagged_excluding(model, &[], excluded).await
     }
 
     pub async fn get_least_busy(&self) -> Option<BackendState> {
@@ -137,18 +138,7 @@ impl BackendPool {
         &self,
         excluded: &HashSet<String>,
     ) -> Option<BackendState> {
-        let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| b.healthy && !excluded.contains(&b.config.name))
-            .min_by(|a, b| {
-                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                a_busy
-                    .partial_cmp(&b_busy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .cloned()
+        self.get_least_busy_tagged_excluding(&[], excluded).await
     }
 
     pub async fn mark_healthy(&self, name: &str) {
@@ -198,9 +188,8 @@ impl BackendPool {
 
     pub async fn get_healthy_with_tags(&self, tags: &[String]) -> Vec<String> {
         let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| b.healthy && tags.iter().all(|t| b.config.tags.contains(t)))
+        filter_healthy(&backends, &HashSet::new(), tags)
+            .into_iter()
             .map(|b| b.config.name.clone())
             .collect()
     }
@@ -215,13 +204,8 @@ impl BackendPool {
         excluded: &HashSet<String>,
     ) -> Option<BackendState> {
         let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| {
-                b.healthy
-                    && !excluded.contains(&b.config.name)
-                    && tags.iter().all(|t| b.config.tags.contains(t))
-            })
+        filter_healthy(&backends, excluded, tags)
+            .into_iter()
             .max_by_key(|b| b.config.priority)
             .cloned()
     }
@@ -238,21 +222,10 @@ impl BackendPool {
         excluded: &HashSet<String>,
     ) -> Option<BackendState> {
         let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| {
-                b.healthy
-                    && !excluded.contains(&b.config.name)
-                    && b.models.contains(&model.to_string())
-                    && tags.iter().all(|t| b.config.tags.contains(t))
-            })
-            .min_by(|a, b| {
-                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                a_busy
-                    .partial_cmp(&b_busy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        filter_healthy(&backends, excluded, tags)
+            .into_iter()
+            .filter(|b| b.models.contains(&model.to_string()))
+            .min_by(least_busy_cmp)
             .cloned()
     }
 
@@ -267,20 +240,9 @@ impl BackendPool {
         excluded: &HashSet<String>,
     ) -> Option<BackendState> {
         let backends = self.backends.read().await;
-        backends
-            .iter()
-            .filter(|b| {
-                b.healthy
-                    && !excluded.contains(&b.config.name)
-                    && tags.iter().all(|t| b.config.tags.contains(t))
-            })
-            .min_by(|a, b| {
-                let a_busy = a.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                let b_busy = b.gpu_metrics.as_ref().map(|g| g.utilization).unwrap_or(0.0);
-                a_busy
-                    .partial_cmp(&b_busy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        filter_healthy(&backends, excluded, tags)
+            .into_iter()
+            .min_by(least_busy_cmp)
             .cloned()
     }
 
