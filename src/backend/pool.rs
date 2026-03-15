@@ -186,6 +186,13 @@ impl BackendPool {
         }
     }
 
+    pub async fn clear_gpu_metrics(&self, name: &str) {
+        let mut backends = self.backends.write().await;
+        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
+            backend.gpu_metrics = None;
+        }
+    }
+
     pub async fn get_healthy_with_tags(&self, tags: &[String]) -> Vec<String> {
         let backends = self.backends.read().await;
         filter_healthy(&backends, &HashSet::new(), tags)

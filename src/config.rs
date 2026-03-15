@@ -101,6 +101,17 @@ pub enum RoutingStrategy {
     WeightedRoundRobin,
 }
 
+impl std::fmt::Display for RoutingStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RoutingStrategy::Priority => write!(f, "priority"),
+            RoutingStrategy::ModelAware => write!(f, "model_aware"),
+            RoutingStrategy::LeastBusy => write!(f, "least_busy"),
+            RoutingStrategy::WeightedRoundRobin => write!(f, "weighted_round_robin"),
+        }
+    }
+}
+
 fn default_strategy() -> RoutingStrategy {
     RoutingStrategy::ModelAware
 }

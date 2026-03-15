@@ -58,11 +58,13 @@ impl HealthChecker {
                                 expected
                             );
                             pool.mark_unhealthy(&name).await;
+                            pool.clear_gpu_metrics(&name).await;
                         }
                     }
                     Err(e) => {
                         warn!("Backend {} health check failed: {}", name, e);
                         pool.mark_unhealthy(&name).await;
+                        pool.clear_gpu_metrics(&name).await;
                     }
                 }
             }
