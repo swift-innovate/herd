@@ -328,7 +328,7 @@ every 4 minutes with `keep_alive: "-1"` to pre-load on startup and recover from 
 | List models (Ollama native) | GET | `/api/tags` | |
 | Health check | GET | `/health` | |
 | Cluster status | GET | `/status` | |
-| GPU metrics | GET | `/gpu` | |
+| GPU metrics | GET | `/status` | Includes GPU data when gpu-hot is configured |
 | Analytics | GET | `/analytics?hours=24` | |
 | Prometheus | GET | `/metrics` | |
 | Update check | GET | `/update` | |

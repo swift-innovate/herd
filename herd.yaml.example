@@ -1,24 +1,54 @@
-# Herd Configuration Example
-# Copy to herd.yaml and customize
+# Herd Configuration Example (v0.4.3)
+# Copy to herd.yaml and customize for your cluster.
+#
+# NOTE: The following keys were removed in v0.4.3 and are silently ignored:
+#   - backends[].default_model  → use backends[].hot_models instead
+#   - routing.idle_timeout_minutes  → use model_warmer.interval_secs instead
+# If present, Herd logs a warning but does not error.
+
+# === SERVER ===
 
 server:
-  host: "0.0.0.0"
-  port: 40114
+  host: "0.0.0.0"               # Listen address (default: 0.0.0.0)
+  port: 40114                    # Listen port (default: 40114)
+  api_key: "your-secret-key"    # Required for admin API endpoints (/admin/*)
+  rate_limit: 0                  # Global requests/sec limit; 0 = unlimited
+
+# === ROUTING ===
 
 routing:
-  strategy: "model_aware"  # priority | model_aware | least_busy
-  timeout: "120s"
-  retry_count: 2
+  strategy: "model_aware"        # Routing algorithm: priority | model_aware | least_busy | weighted_round_robin
+  timeout: "120s"                # Per-request timeout for backend calls (supports s, ms, m, h)
+  retry_count: 2                 # Retries on backend failure before returning an error
+  default_keep_alive: "-1"       # Injected into every /api/generate and /api/chat request body.
+                                 # "-1" = never unload; "5m" = 5 minutes; "0" = unload immediately.
+                                 # Overrides whatever the client sent. Not injected on /v1/* paths.
+
+# === MODEL WARMER ===
+# Replaces the old model_homing block from v0.4.2.
+# Sends keep_alive pings to hot_models on each backend to prevent Ollama's
+# default 5-minute eviction. Also pre-loads hot_models on startup.
+
+model_warmer:
+  interval_secs: 240             # Seconds between keep-alive pings (default: 240, min: 10).
+                                 # Must be shorter than Ollama's eviction window (default 5 min).
+
+# === BACKENDS ===
 
 backends:
-  - name: "citadel-5090"
-    url: "http://citadel:11434"
-    priority: 100
-    gpu_hot_url: "http://citadel:1312"
-    tags:
+  - name: "citadel-5090"         # Unique name shown in dashboard and logs
+    url: "http://citadel:11434"  # Ollama API base URL (required)
+    priority: 100                # Higher = preferred; used by priority and weighted_round_robin strategies
+    gpu_hot_url: "http://citadel:1312"  # gpu-hot endpoint for real-time GPU metrics (optional)
+    tags:                        # Tags for X-Herd-Tags header routing (optional)
       - "local"
       - "gpu"
       - "high-vram"
+    hot_models:                  # Models to keep permanently loaded on this backend (optional)
+      - "qwen2.5-coder:32b"     # Must include the tag (e.g. :latest, :32b)
+      - "glm-4.7-flash:latest"
+    health_check_path: "/api/version"  # Custom health-check path (default: /api/version)
+    # health_check_status: 200   # Expected HTTP status for health checks (default: 200)
 
   - name: "minipc-4080"
     url: "http://100.81.153.82:11434"
@@ -32,18 +62,31 @@ backends:
   - name: "warden-4070"
     url: "http://100.106.188.105:11434"
     priority: 50
-    model_filter: "≤8B"  # Only route small models here
+    model_filter: "≤8B"          # Only route models matching this filter to this backend.
+                                 # This is a literal string parsed by Herd — "≤8B" means
+                                 # "only models with parameter count <= 8 billion".
+                                 # You can also use a regex pattern like "qwen|llama" to match
+                                 # model names. The ≤/≥ prefix syntax is specific to size filtering.
     tags:
       - "local"
       - "gpu"
       - "low-vram"
 
+# === CIRCUIT BREAKER ===
+# Automatically stops routing to failing backends and probes them for recovery.
+
 circuit_breaker:
-  failure_threshold: 3
-  timeout: "30s"
-  recovery_time: "60s"
+  failure_threshold: 3           # Consecutive failures before marking backend unhealthy (default: 5)
+  timeout: "30s"                 # Timeout for health-check probes (default: 120s)
+  recovery_time: "60s"           # Wait time before probing an unhealthy backend (default: 30s)
+                                 # Should be greater than timeout for effective recovery
+
+# === OBSERVABILITY ===
 
 observability:
-  metrics: true
-  admin_api: true
-  tracing: false
+  metrics: true                  # Enable /metrics endpoint (Prometheus format) (default: true)
+  admin_api: true                # Enable /admin/* management endpoints (default: false)
+  tracing: false                 # Enable debug tracing output (default: false)
+  log_retention_days: 7          # Auto-prune JSONL request logs older than N days (default: 7)
+  log_max_size_mb: 100           # Rotate log file when it exceeds N MB (default: 100, 0 = no limit)
+  log_max_files: 5               # Keep up to N rotated log files (default: 5)

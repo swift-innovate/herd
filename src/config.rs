@@ -250,11 +250,93 @@ fn default_log_max_files() -> u32 {
     5
 }
 
+/// Deprecated config keys removed in v0.4.3 with their replacement guidance.
+const DEPRECATED_KEYS: &[(&str, &str)] = &[
+    ("default_model", "Config key 'default_model' is no longer supported (removed in v0.4.3). Use 'hot_models' instead. This setting has no effect."),
+    ("idle_timeout_minutes", "Config key 'idle_timeout_minutes' is no longer supported (removed in v0.4.3). This setting has no effect."),
+];
+
 impl Config {
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
+
+        // First pass: check for deprecated keys in raw YAML
+        if let Ok(raw) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            Self::warn_deprecated_keys(&raw, &[]);
+        }
+
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
+    }
+
+    fn warn_deprecated_keys(value: &serde_yaml::Value, path: &[String]) {
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (k, v) in map {
+                if let serde_yaml::Value::String(key) = k {
+                    for &(deprecated, message) in DEPRECATED_KEYS {
+                        if key == deprecated {
+                            let location = if path.is_empty() {
+                                key.clone()
+                            } else {
+                                format!("{}.{}", path.join("."), key)
+                            };
+                            tracing::warn!("{} (found at '{}')", message, location);
+                        }
+                    }
+                    let mut child_path = path.to_vec();
+                    child_path.push(key.clone());
+                    Self::warn_deprecated_keys(v, &child_path);
+                }
+            }
+        }
+        if let serde_yaml::Value::Sequence(seq) = value {
+            for (i, item) in seq.iter().enumerate() {
+                let mut child_path = path.to_vec();
+                child_path.push(format!("[{}]", i));
+                Self::warn_deprecated_keys(item, &child_path);
+            }
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        // Validate model_warmer interval
+        if self.model_warmer.interval_secs > 0 && self.model_warmer.interval_secs < 10 {
+            anyhow::bail!(
+                "model_warmer.interval_secs must be >= 10 (got {})",
+                self.model_warmer.interval_secs
+            );
+        }
+
+        // Validate backend URLs
+        for (i, backend) in self.backends.iter().enumerate() {
+            if backend.url.is_empty() {
+                anyhow::bail!("backends[{}] ('{}') has an empty URL", i, backend.name);
+            }
+            if !backend.url.starts_with("http://") && !backend.url.starts_with("https://") {
+                anyhow::bail!(
+                    "backends[{}] ('{}') has an invalid URL (must start with http:// or https://): '{}'",
+                    i,
+                    backend.name,
+                    backend.url
+                );
+            }
+        }
+
+        // Warn if recovery_time <= timeout on circuit breaker
+        if let (Ok(recovery), Ok(timeout)) = (
+            parse_duration(&self.circuit_breaker.recovery_time),
+            parse_duration(&self.circuit_breaker.timeout),
+        ) {
+            if recovery <= timeout {
+                tracing::warn!(
+                    "circuit_breaker.recovery_time ({}) should be greater than circuit_breaker.timeout ({}) for effective recovery",
+                    self.circuit_breaker.recovery_time,
+                    self.circuit_breaker.timeout
+                );
+            }
+        }
+
+        Ok(())
     }
 
     pub fn to_yaml(&self) -> Result<String> {

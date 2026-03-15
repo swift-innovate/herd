@@ -11,7 +11,7 @@ Running multiple agents + parallel tool calls? Herd stops the GPU wars.
 Just set your OpenClaw `baseUrl` to `http://your-herd:40114` — done.
 Model homing + live VRAM routing keeps every agent on the fastest node.
 
-> **Pro tip:** Point your OpenClaw agents at Herd and they instantly become GPU-smart — live VRAM routing, model homing, zero cold-start tax, and buttery parallel tool calls across your whole swarm.
+> **Pro tip:** Point your OpenClaw agents at Herd and they instantly become GPU-smart — live VRAM routing, model-aware routing to already-loaded backends, and parallel tool calls across your whole swarm without GPU wars.
 <img width="1735" height="803" alt="image" src="https://github.com/user-attachments/assets/d625b30f-8110-482e-80cd-e3297a5ff428" />
 
 
@@ -19,6 +19,80 @@ Model homing + live VRAM routing keeps every agent on the fastest node.
 **Intelligent Ollama router with GPU awareness, analytics, and real-time monitoring.**
 
 Route your llama herd with intelligence — priority routing, circuit breakers, model awareness, real-time GPU metrics, beautiful dashboards, and OpenAI-compatible endpoints.
+
+## Getting Started
+
+Herd is a reverse proxy that sits in front of your Ollama instances, routing requests to the best available backend based on model availability, GPU load, and priority.
+
+### 1. Create a config file
+
+```yaml
+# herd.yaml — minimal setup
+backends:
+  - name: "my-gpu"
+    url: "http://localhost:11434"
+    priority: 100
+
+routing:
+  strategy: "model_aware"
+```
+
+### 2. Run Herd
+
+```bash
+cargo install herd
+herd --config herd.yaml
+```
+
+### 3. Verify it works
+
+```bash
+curl http://localhost:40114/health          # → "OK"
+curl http://localhost:40114/status          # → backend list + GPU info
+curl http://localhost:40114/v1/models       # → available models across all backends
+```
+
+You're now routing through Herd. Point any OpenAI-compatible client or Ollama agent at `http://localhost:40114`.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                    Herd                          │
+├─────────────────────────────────────────────────┤
+│  ┌─────────┐  ┌─────────┐  ┌─────────────┐     │
+│  │  HTTP   │  │ Router  │  │   Circuit   │     │
+│  │  Proxy  │→ │ Engine  │→ │   Breaker   │     │
+│  └─────────┘  └─────────┘  └─────────────┘     │
+│       ↓            ↓              ↓              │
+│  ┌────────────────────────────────────────┐   │
+│  │            Backend Pool                 │   │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐   │   │
+│  │  │ Citadel │ │  minipc │ │  warden │   │   │
+│  │  │ :11434  │ │ :11434  │ │ :11434  │   │   │
+│  │  │ :1312   │ │ :1312   │ │ :1312   │   │   │
+│  │  └─────────┘ └─────────┘ └─────────┘   │   │
+│  └────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+```
+
+## What Herd delivers (and what it doesn't)
+
+**The real win for swarms is contention reduction, not cold-start elimination.**
+
+With a thoughtful `hot_models` list and `model_aware` strategy, Herd eliminates the worst waits for your top 20–30 most-used models — routing every request to a backend where that model is already resident and warm. The remaining models still hit Ollama's normal 20–60 s load time on first use or after an eviction cascade; Herd can't conjure VRAM that isn't there.
+
+What makes Herd more than DNS round-robin + client retry:
+
+| | DNS round-robin | Herd |
+|---|---|---|
+| Knows which backend has the model loaded | ❌ | ✅ via `/api/ps` polling |
+| Routes by live GPU utilization | ❌ | ✅ via gpu-hot telemetry |
+| Enforces `keep_alive` centrally | ❌ | ✅ injected on every request |
+| Circuit-breaks failed nodes | ❌ | ✅ |
+| Single place to add retries/failover | ❌ | ✅ |
+
+Herd is a **smart stateless proxy with a stateful routing cache**. It is not HA failover — in-flight requests are not redirected if a backend dies mid-stream. That's on the roadmap.
 
 ## Features
 
@@ -52,7 +126,7 @@ Route your llama herd with intelligence — priority routing, circuit breakers, 
 - **Latency tracking** — P50, P95, P99 percentiles
 - **Update checker** — Automatic GitHub release notifications
 
-> **v0.4.1** — Agent Guide dashboard tab, skills.md reference, Prometheus metrics, correlation IDs, log rotation. See the [Roadmap](ROADMAP.md) for what's next.
+> **v0.4.3** — keep_alive injection, hot models warmer, Agent Guide dashboard tab, skills.md reference, Prometheus metrics, correlation IDs, log rotation. See the [Roadmap](ROADMAP.md) for what's next.
 
 ## Quick Start
 
@@ -90,6 +164,20 @@ curl http://herd:40114/skills | jq .best_practices
 4. Send `X-Request-Id` for traceability across distributed systems
 5. Query `GET /v1/models` to discover available models before requesting
 6. Prefer native Ollama endpoints (`/api/chat`, `/api/generate`) over `/v1/chat/completions` — Herd routes both identically, but the native endpoints bypass Ollama's OpenAI compat layer and work reliably with all models
+
+## Using Herd with any Ollama client
+
+Herd is built for OpenClaw swarms, but it works as a drop-in proxy for any Ollama client or tool — Open WebUI, Continue.dev, Cursor, LiteLLM, custom scripts, whatever.
+
+```bash
+# Before: point directly at one Ollama node
+OLLAMA_HOST=http://my-gpu:11434
+
+# After: point at Herd instead — nothing else changes
+OLLAMA_HOST=http://herd:40114
+```
+
+You get model-aware routing, circuit breakers, GPU telemetry routing, and centralized `keep_alive` enforcement with zero client changes. If you only have one GPU node today, Herd still centralizes `keep_alive` and gives you a dashboard — and you can add more backends later without touching your clients.
 
 ## Configuration
 
@@ -141,6 +229,18 @@ observability:
   log_max_size_mb: 100       # Rotate log file when it exceeds N MB
   log_max_files: 5           # Keep N rotated log files
 ```
+
+## Choosing the Right Endpoint
+
+> **Important:** Not all models work on all endpoints. Choose based on your model and client.
+
+**Decision tree:**
+
+1. **Using GLM, custom-template models, or any model that misbehaves?** → Use `/api/chat` (native Ollama). This bypasses Ollama's OpenAI compatibility layer and works reliably with all models.
+2. **Need OpenAI SDK compatibility** (e.g., `openai.ChatCompletion.create`)? → Use `/v1/chat/completions`, but **test with your specific model first**. Some models hang or error on this endpoint.
+3. **Single-turn generation?** → Use `/api/generate`.
+
+`/api/chat` and `/api/generate` also receive Herd's `keep_alive` injection. `/v1/*` endpoints do not.
 
 ## API Endpoints
 
@@ -316,7 +416,7 @@ Herd pre-loads declared models on startup and re-loads them after OOM eviction b
 | `backends[].default_model: "model:tag"` | `backends[].hot_models: ["model:tag"]` |
 | `routing.idle_timeout_minutes: 30` | `model_warmer.interval_secs: 240` |
 
-Old config keys are silently ignored after upgrading — **no startup error, but homing stops working**. Update your `herd.yaml` before upgrading.
+Old config keys are ignored after upgrading — Herd will log a warning at startup identifying the stale keys and their replacements. Update your `herd.yaml` to clear the warnings and restore intended behavior.
 
 ## GPU Awareness
 
@@ -374,28 +474,6 @@ Herd will route based on:
 - Model already loaded (via `/api/ps`)
 - GPU VRAM available
 - Current utilization
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│                    Herd                          │
-├─────────────────────────────────────────────────┤
-│  ┌─────────┐  ┌─────────┐  ┌─────────────┐     │
-│  │  HTTP   │  │ Router  │  │   Circuit   │     │
-│  │  Proxy  │→ │ Engine  │→ │   Breaker   │     │
-│  └─────────┘  └─────────┘  └─────────────┘     │
-│       ↓            ↓              ↓              │
-│  ┌────────────────────────────────────────┐   │
-│  │            Backend Pool                 │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐   │   │
-│  │  │ Citadel │ │  minipc │ │  warden │   │   │
-│  │  │ :11434  │ │ :11434  │ │ :11434  │   │   │
-│  │  │ :1312   │ │ :1312   │ │ :1312   │   │   │
-│  │  └─────────┘ └─────────┘ └─────────┘   │   │
-│  └────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
-```
 
 ## Comparison to Olla
 
