@@ -628,8 +628,22 @@ async fn proxy_handler(
                     continue;
                 }
 
+                // Note: mid-stream failover is not possible for streaming responses;
+                // this handles pre-stream 5xx only.
+                if matches!(r.status().as_u16(), 500 | 502 | 503) {
+                    tracing::warn!(
+                        "Backend {} returned {} — retrying on another backend",
+                        backend.name, r.status()
+                    );
+                    state.pool.mark_unhealthy(&backend.name).await;
+                    excluded.insert(backend.name.clone());
+                    continue;
+                }
+
                 state.pool.mark_healthy(&backend.name).await;
                 response = Some(r);
+                let strategy = state.config_snapshot().await.routing.strategy.to_string();
+                state.metrics.record_routing_selection(&backend.name, &strategy).await;
                 break;
             }
             Err(e) => {

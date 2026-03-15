@@ -13,6 +13,8 @@ pub struct Metrics {
     /// Latency histogram buckets (in milliseconds)
     /// Buckets: 10, 50, 100, 250, 500, 1000, 2500, 5000, 10000, +Inf
     pub latency_buckets: Arc<RwLock<LatencyHistogram>>,
+    /// Routing selections by "{backend}|{strategy}"
+    pub routing_selections: Arc<RwLock<HashMap<String, AtomicU64>>>,
 }
 
 pub struct LatencyHistogram {
@@ -94,6 +96,7 @@ impl Metrics {
             requests_total: Arc::new(RwLock::new(HashMap::new())),
             requests_by_backend: Arc::new(RwLock::new(HashMap::new())),
             latency_buckets: Arc::new(RwLock::new(LatencyHistogram::new())),
+            routing_selections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -117,6 +120,14 @@ impl Metrics {
             let hist = self.latency_buckets.read().await;
             hist.observe(duration_ms);
         }
+    }
+
+    pub async fn record_routing_selection(&self, backend: &str, strategy: &str) {
+        let key = format!("{}|{}", backend, strategy);
+        let mut map = self.routing_selections.write().await;
+        map.entry(key)
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub async fn render(&self) -> String {
@@ -150,6 +161,23 @@ impl Metrics {
             }
         }
 
+        // Routing selections
+        out.push_str("\n# HELP herd_routing_selections_total Routing selections by backend and strategy\n");
+        out.push_str("# TYPE herd_routing_selections_total counter\n");
+        {
+            let map = self.routing_selections.read().await;
+            for (key, count) in map.iter() {
+                if let Some((backend, strategy)) = key.split_once('|') {
+                    out.push_str(&format!(
+                        "herd_routing_selections_total{{backend=\"{}\", strategy=\"{}\"}} {}\n",
+                        backend,
+                        strategy,
+                        count.load(Ordering::Relaxed)
+                    ));
+                }
+            }
+        }
+
         // Latency histogram
         out.push('\n');
         {
@@ -177,6 +205,18 @@ mod tests {
         assert!(output.contains("herd_requests_total{status=\"error\"} 1"));
         assert!(output.contains("herd_requests_by_backend{backend=\"backend-a\"} 2"));
         assert!(output.contains("herd_request_duration_ms_count 3"));
+    }
+
+    #[tokio::test]
+    async fn records_and_renders_routing_selections() {
+        let m = Metrics::new();
+        m.record_routing_selection("gpu1", "priority").await;
+        m.record_routing_selection("gpu1", "priority").await;
+        m.record_routing_selection("gpu2", "least_busy").await;
+
+        let output = m.render().await;
+        assert!(output.contains("herd_routing_selections_total{backend=\"gpu1\", strategy=\"priority\"} 2"));
+        assert!(output.contains("herd_routing_selections_total{backend=\"gpu2\", strategy=\"least_busy\"} 1"));
     }
 
     #[test]
