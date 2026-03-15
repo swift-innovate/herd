@@ -1,0 +1,15 @@
+# Normalize line endings to LF on commit
+* text=auto eol=lf
+*.rs text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+
+# Binaries
+*.png binary
+*.jpg binary
+*.gif binary
