@@ -1,6 +1,6 @@
 # Herd Roadmap
 
-**Updated:** March 9, 2026
+**Updated:** April 5, 2026
 
 ## Vision
 
@@ -55,13 +55,39 @@ No cloud dependency. No API keys exposed. Full local control.
 - Hot models warmer — `hot_models: [...]` per backend; background warmer pings every 4 min with `keep_alive: "-1"` for pre-load and OOM recovery
 - Removes `ModelHoming` and `default_model` — superseded by `hot_models` + proxy injection
 
-### v0.5.0+ — Scale & Ecosystem (Q3 2026)
+### v0.5.0 — Task Classification ✅
+
+- Keyword-based task tier classification middleware
+- Automatic model selection by complexity tier (heavy/standard/lightweight)
+- `X-Herd-Tier` response header on classified requests
+- Analytics logging with `tier` and `classified_by` fields
+- Off by default — zero overhead when disabled
+
+### v0.9.0 — Herd Pro Merge (Unified Release) ✅
+
+> **Herd Pro features merged into the public repo. Herd Pro is now archived.**
+
+- Agent session management (create, list, resume, delete with message history and TTL)
+- Built-in tool calling (read_file, write_file, list_files, run_command)
+- Permission engine — regex-based deny patterns for file and shell access
+- JSONL audit logging for tool calls and permission denials
+- WebSocket streaming for real-time agent events
+- Node registration — herd-tune scripts for auto-enrolling Ollama nodes
+- Fleet management — SQLite node registry, health polling, dashboard Fleet tab
+- Enrollment key authentication for node registration
+- Dashboard: Sessions, Fleet, and Settings (config editor) tabs
+- Config editor API (`GET/PUT /admin/config`) with secret redaction
+
+### v1.0.0+ — Scale & Ecosystem (Future)
 
 - Multi-node discovery (mDNS / static fleet config)
 - TLS termination
 - Rate limiting per client / API key
 - Plugin system for custom routing strategies
 - Distributed health consensus
+- Budget caps and cost tracking
+- Routing profiles (named presets)
+- Multi-model consensus routing
 
 ## Get Involved
 

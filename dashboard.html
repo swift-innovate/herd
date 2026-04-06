@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herd Dashboard</title>
+    <title>Herd Pro Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -198,6 +198,96 @@
         .latency-value { font-size: 24px; font-weight: 700; color: #fbbf24; }
         .latency-label { font-size: 12px; color: #64748b; margin-top: 4px; }
 
+        /* Sessions */
+        .sessions-header-stats {
+            display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+        }
+        .sessions-header-stats .meta-item { font-size: 12px; }
+
+        .session-card { cursor: pointer; }
+        .session-card .card-header { margin-bottom: 8px; }
+        .session-model { font-size: 14px; color: #818cf8; font-weight: 600; }
+        .session-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+        .session-status { padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+        .session-status.active { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .session-status.processing { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+        .session-status.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+        .session-card.error {
+            border-color: rgba(239, 68, 68, 0.4);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.08);
+        }
+        .session-card.error .card-name::after {
+            content: 'ERROR';
+            display: inline-block;
+            background: rgba(239, 68, 68, 0.2); color: #ef4444;
+            font-size: 9px; font-weight: 700; padding: 1px 6px;
+            border-radius: 4px; margin-left: 8px; vertical-align: middle; letter-spacing: 0.5px;
+        }
+        .session-card.processing { border-color: rgba(251, 191, 36, 0.4); }
+        .session-card.processing .card-name::after {
+            content: '';
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            background: #fbbf24; margin-left: 8px; vertical-align: middle;
+            animation: processing-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes processing-pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
+            50% { opacity: 0.5; box-shadow: 0 0 8px 2px rgba(251, 191, 36, 0.3); }
+        }
+
+        /* Session Messages */
+        .msg { padding: 10px 14px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; }
+        .msg.system { background: rgba(99, 102, 241, 0.1); border-left: 3px solid #818cf8; }
+        .msg.user { background: rgba(255, 255, 255, 0.04); border-left: 3px solid #64748b; }
+        .msg.assistant { background: rgba(34, 197, 94, 0.08); border-left: 3px solid #4ade80; }
+        .msg.tool { background: rgba(251, 191, 36, 0.08); border-left: 3px solid #fbbf24; font-family: monospace; font-size: 12px; }
+        .msg-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; color: #94a3b8; }
+        .msg-content { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+        .msg-tool-calls { margin-top: 6px; font-size: 12px; color: #818cf8; }
+
+        .msg.tool.permission-denied {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid #ef4444;
+        }
+        .msg.tool.permission-denied .msg-role { color: #ef4444; }
+        .msg.tool.permission-denied::before {
+            content: 'DENIED';
+            display: inline-block;
+            background: rgba(239, 68, 68, 0.2); color: #ef4444;
+            font-size: 10px; font-weight: 700; padding: 1px 6px;
+            border-radius: 4px; margin-bottom: 6px; letter-spacing: 0.5px;
+        }
+
+        /* Session Send Message */
+        .session-send-row {
+            display: flex; gap: 8px; margin-top: 16px; padding-top: 16px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .session-send-row input {
+            flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.04); color: #e2e8f0; font-size: 13px; outline: none;
+        }
+        .session-send-row input:focus { border-color: rgba(99,102,241,0.5); }
+        .session-send-row button {
+            padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+            background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid rgba(99,102,241,0.4);
+            cursor: pointer; transition: background 0.2s;
+        }
+        .session-send-row button:hover { background: rgba(99,102,241,0.3); }
+
+        /* Empty Sessions */
+        .sessions-empty { text-align: center; padding: 48px 24px; color: #64748b; }
+        .sessions-empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.5; }
+        .sessions-empty-title { font-size: 16px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; }
+        .sessions-empty-text { font-size: 13px; line-height: 1.6; max-width: 420px; margin: 0 auto; }
+        .sessions-empty-code {
+            display: inline-block; margin-top: 12px;
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px; padding: 8px 14px;
+            font-family: monospace; font-size: 12px; color: #818cf8; text-align: left;
+        }
+
         /* Footer */
         .footer {
             margin-top: 24px; padding-top: 16px;
@@ -205,6 +295,7 @@
             display: flex; justify-content: space-between;
             font-size: 12px; color: #475569;
         }
+        .footer-refresh { color: #64748b; }
 
         /* Modal */
         .modal-overlay {
@@ -236,13 +327,19 @@
         .modal-actions .btn-submit:hover { background: rgba(99, 102, 241, 0.3); }
 
         /* Toast */
-        .toast {
-            position: fixed; bottom: 24px; right: 24px; padding: 10px 18px; border-radius: 8px;
-            font-size: 13px; font-weight: 500; z-index: 200; opacity: 0; transition: opacity 0.3s;
+        .toast-container {
+            position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 300; display: flex; flex-direction: column; gap: 8px;
+            align-items: center; pointer-events: none;
         }
-        .toast.show { opacity: 1; }
-        .toast.success { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
-        .toast.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .toast-item {
+            padding: 10px 24px; border-radius: 8px; font-size: 13px; font-weight: 500;
+            pointer-events: auto; transform: translateY(-20px); opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease; max-width: 500px;
+        }
+        .toast-item.show { transform: translateY(0); opacity: 1; }
+        .toast-item.success { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .toast-item.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
 
         /* Empty state */
         .empty-state {
@@ -343,13 +440,105 @@
             .container { padding: 16px; }
             .stat-value { font-size: 22px; }
         }
+
+        /* Fleet Management */
+        .fleet-add-node {
+            margin-bottom: 24px; padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06); border-radius: 12px;
+        }
+        .fleet-add-node h3 { font-size: 16px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px; }
+        .fleet-add-node p { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+        .script-download-buttons { display: flex; gap: 12px; margin: 16px 0; }
+        .script-download-buttons .btn { text-decoration: none; display: inline-block; }
+        .btn-primary {
+            background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4);
+            padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover { background: rgba(99, 102, 241, 0.3); border-color: rgba(99, 102, 241, 0.6); }
+        .btn-secondary {
+            background: rgba(255,255,255,0.04); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1);
+            padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+        .quick-start details { font-size: 13px; color: #94a3b8; }
+        .quick-start summary {
+            cursor: pointer; font-weight: 600; color: #818cf8; font-size: 13px;
+            padding: 4px 0; user-select: none;
+        }
+        .quick-start summary:hover { color: #a5b4fc; }
+        .instructions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 12px; }
+        .instructions-grid h4 { font-size: 14px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px; }
+        .instructions-grid ol { padding-left: 18px; line-height: 1.8; }
+        .instructions-grid code {
+            background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #4ade80;
+        }
+        .fleet-table-container { margin-top: 16px; }
+        .fleet-table-container h3 {
+            font-size: 16px; font-weight: 600; color: #e2e8f0; margin-bottom: 12px;
+        }
+        .fleet-table-container h3 span { color: #64748b; font-weight: 400; }
+        .data-table {
+            width: 100%; border-collapse: collapse; font-size: 13px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.06); border-radius: 12px;
+            overflow: hidden;
+        }
+        .data-table th {
+            text-align: left; padding: 10px 14px; color: #64748b; font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 12px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .data-table td {
+            padding: 10px 14px; color: #94a3b8;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table td.empty-state { text-align: center; padding: 40px; color: #64748b; }
+        .status-dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; margin-right: 6px; vertical-align: middle;
+        }
+        .status-healthy { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.4); }
+        .status-degraded { background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
+        .status-unreachable { background: #ef4444; }
+        .status-disabled { background: #6b7280; }
+        .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; vertical-align: middle; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; inset: 0;
+            background: #4b5563; border-radius: 20px; transition: 0.2s;
+        }
+        .toggle-slider:before {
+            content: ''; position: absolute; width: 16px; height: 16px;
+            left: 2px; bottom: 2px; background: white;
+            border-radius: 50%; transition: 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: #4ade80; }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); }
+        .inline-input {
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+            color: #e2e8f0; border-radius: 6px; padding: 4px 6px; text-align: center;
+            font-size: 13px; outline: none;
+        }
+        .inline-input:focus { border-color: rgba(99, 102, 241, 0.5); }
+        .row-disabled { opacity: 0.5; }
+        .fleet-actions { display: flex; align-items: center; gap: 8px; }
+        @media (max-width: 768px) {
+            .instructions-grid { grid-template-columns: 1fr; }
+            .data-table { font-size: 12px; }
+            .data-table th, .data-table td { padding: 8px 10px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1><span>&#x1F999;</span> Herd</h1>
+            <h1><span>&#x1F999;</span> Herd Pro</h1>
             <div class="header-right">
                 <div class="header-meta">
                     <span class="strategy-badge" id="strategy">--</span>
@@ -363,7 +552,7 @@
                 </div>
                 <input type="password" id="api-key-input" placeholder="API Key"
                     style="width:120px; padding:4px 8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#e2e8f0; font-size:12px;"
-                    onchange="setApiKey(this.value);">
+                    onchange="setApiKey(this.value); refresh(); refreshSessions();">
                 <button class="btn" onclick="openAddModal()">+ Add Node</button>
             </div>
         </div>
@@ -397,8 +586,17 @@
             <div class="tab" data-tab="analytics" onclick="switchTab('analytics')">
                 Analytics
             </div>
+            <div class="tab" data-tab="sessions" onclick="switchTab('sessions')">
+                Sessions <span class="tab-badge" id="sessions-tab-badge">0</span>
+            </div>
             <div class="tab" data-tab="agent-guide" onclick="switchTab('agent-guide')">
                 Agent Guide
+            </div>
+            <div class="tab" data-tab="fleet" onclick="switchTab('fleet')">
+                Fleet <span class="tab-badge" id="fleet-tab-badge">0</span>
+            </div>
+            <div class="tab" data-tab="settings" onclick="switchTab('settings')">
+                Settings
             </div>
         </div>
 
@@ -443,6 +641,16 @@
                     <div class="latency-label">p99 Latency</div>
                 </div>
             </div>
+        </div>
+
+        <!-- Sessions Tab -->
+        <div class="tab-content" id="tab-sessions">
+            <div class="sessions-header-stats" id="sessions-header-stats" style="margin-bottom:16px;">
+                <span class="meta-item" id="session-count">0 active</span>
+                <span class="meta-item" id="session-tool-calls">Tool Calls: <strong>--</strong></span>
+                <span class="meta-item" id="session-denials">Denials: <strong>--</strong></span>
+            </div>
+            <div class="grid" id="sessions-grid"></div>
         </div>
 
         <!-- Agent Guide Tab -->
@@ -512,20 +720,6 @@ Content-Type: application/json
                 </div>
 
                 <div class="guide-section">
-                    <h2>Task Classification (opt-in)</h2>
-                    <p>Automatically routes requests to appropriate models by complexity when no model is specified.</p>
-                    <div class="guide-card">
-                        <h3>How It Works</h3>
-                        <ul>
-                            <li><strong>Trigger:</strong> Send a request without specifying a model</li>
-                            <li><strong>Response:</strong> Includes <code>X-Herd-Tier</code> header showing the assigned tier (<code>heavy</code>, <code>standard</code>, <code>lightweight</code>)</li>
-                            <li><strong>Skipped when:</strong> Request includes a <code>model</code> field or <code>X-Herd-Tags</code> header</li>
-                            <li><strong>Configure:</strong> Tiers and keywords in <code>herd.yaml</code> under <code>task_classifier</code></li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="guide-section">
                     <h2>Routing Strategies</h2>
                     <p>The active strategy is shown in the header badge. It determines how Herd picks a backend for your request.</p>
                     <table class="guide-table">
@@ -589,10 +783,265 @@ Content-Type: application/json
             </div>
         </div>
 
+        <!-- Fleet Tab -->
+        <div class="tab-content" id="tab-fleet">
+            <div class="fleet-add-node">
+                <h3>Add Node to Fleet</h3>
+                <p>Run the herd-tune script on any machine with Ollama to auto-detect hardware and register with this Herd Pro instance.</p>
+
+                <div class="script-download-buttons">
+                    <a href="/api/nodes/script?os=windows" class="btn btn-primary" download>
+                        Windows (PowerShell)
+                    </a>
+                    <a href="/api/nodes/script?os=linux" class="btn btn-secondary" download>
+                        Linux (Bash)
+                    </a>
+                </div>
+
+                <div class="quick-start">
+                    <details>
+                        <summary>Quick Start Instructions</summary>
+                        <div class="instructions-grid">
+                            <div>
+                                <h4>Windows</h4>
+                                <ol>
+                                    <li>Download herd-tune.ps1 (button above)</li>
+                                    <li>Open PowerShell as Administrator on your Ollama machine</li>
+                                    <li>Run: <code>.\herd-tune.ps1 -Apply</code></li>
+                                    <li>Done &mdash; your node will appear in the fleet below</li>
+                                </ol>
+                            </div>
+                            <div>
+                                <h4>Linux</h4>
+                                <ol>
+                                    <li>Download herd-tune.sh (button above)</li>
+                                    <li>On your Ollama machine:<br>
+                                        <code>chmod +x herd-tune.sh</code><br>
+                                        <code>sudo ./herd-tune.sh --apply</code></li>
+                                    <li>Done &mdash; your node will appear in the fleet below</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+            </div>
+
+            <div class="fleet-table-container">
+                <h3>Registered Nodes <span id="fleet-count">(0)</span></h3>
+                <table class="data-table" id="fleet-table">
+                    <thead>
+                        <tr>
+                            <th>Hostname</th>
+                            <th>GPU</th>
+                            <th>VRAM</th>
+                            <th>RAM</th>
+                            <th>Status</th>
+                            <th>Models Loaded</th>
+                            <th>Available</th>
+                            <th>Parallel</th>
+                            <th>Priority</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fleet-nodes-body">
+                        <tr><td colspan="10" class="empty-state">No nodes registered yet. Download and run herd-tune to add nodes.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div class="tab-content" id="tab-settings">
+            <div id="settings-locked" style="display:none; text-align:center; padding:60px 20px;">
+                <h3 style="color:#e2e8f0;">API Key Required</h3>
+                <p style="color:#94a3b8;">Enter your API key above to access settings.</p>
+            </div>
+            <div id="settings-form" style="display:none;">
+                <div id="settings-no-key-warning" style="display:none; background:#78350f; border:1px solid #d97706; border-radius:8px; padding:12px 16px; margin-bottom:20px; color:#fbbf24;">
+                    No API key is set. Admin endpoints are unprotected. Set one below.
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <!-- Server -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Server</h3>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Host</span>
+                            <input type="text" id="cfg-server-host" style="width:100%; margin-top:4px;" placeholder="0.0.0.0">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Port</span>
+                            <input type="number" id="cfg-server-port" style="width:100%; margin-top:4px;" placeholder="40114">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">API Key</span>
+                            <input type="password" id="cfg-server-apikey" style="width:100%; margin-top:4px;" placeholder="Leave blank to keep current">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Enrollment Key (for node registration)</span>
+                            <input type="password" id="cfg-server-enrollmentkey" style="width:100%; margin-top:4px;" placeholder="Leave blank to keep current">
+                        </label>
+                        <label style="display:block;">
+                            <span style="color:#94a3b8; font-size:12px;">Rate Limit (req/s, 0 = unlimited)</span>
+                            <input type="number" id="cfg-server-ratelimit" style="width:100%; margin-top:4px;" placeholder="0" min="0">
+                        </label>
+                    </div>
+
+                    <!-- Routing -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Routing</h3>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Strategy</span>
+                            <select id="cfg-routing-strategy" style="width:100%; margin-top:4px; padding:8px; background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:6px;">
+                                <option value="model_aware">Model Aware</option>
+                                <option value="priority">Priority</option>
+                                <option value="least_busy">Least Busy</option>
+                                <option value="weighted_round_robin">Weighted Round Robin</option>
+                            </select>
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Timeout</span>
+                            <input type="text" id="cfg-routing-timeout" style="width:100%; margin-top:4px;" placeholder="120s">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Retry Count</span>
+                            <input type="number" id="cfg-routing-retrycount" style="width:100%; margin-top:4px;" min="0">
+                        </label>
+                        <label style="display:block;">
+                            <span style="color:#94a3b8; font-size:12px;">Default Keep Alive</span>
+                            <input type="text" id="cfg-routing-keepalive" style="width:100%; margin-top:4px;" placeholder="5m">
+                        </label>
+                    </div>
+
+                    <!-- Circuit Breaker -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Circuit Breaker</h3>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Failure Threshold</span>
+                            <input type="number" id="cfg-cb-threshold" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Timeout</span>
+                            <input type="text" id="cfg-cb-timeout" style="width:100%; margin-top:4px;" placeholder="120s">
+                        </label>
+                        <label style="display:block;">
+                            <span style="color:#94a3b8; font-size:12px;">Recovery Time</span>
+                            <input type="text" id="cfg-cb-recovery" style="width:100%; margin-top:4px;" placeholder="30s">
+                        </label>
+                    </div>
+
+                    <!-- Observability -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Observability</h3>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#e2e8f0;">
+                            <input type="checkbox" id="cfg-obs-metrics"> Metrics endpoint
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#e2e8f0;">
+                            <input type="checkbox" id="cfg-obs-adminapi"> Admin API
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#e2e8f0;">
+                            <input type="checkbox" id="cfg-obs-tracing"> Tracing
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Log Retention (days)</span>
+                            <input type="number" id="cfg-obs-retention" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Max Log Size (MB)</span>
+                            <input type="number" id="cfg-obs-maxsize" style="width:100%; margin-top:4px;" min="0">
+                        </label>
+                        <label style="display:block;">
+                            <span style="color:#94a3b8; font-size:12px;">Max Log Files</span>
+                            <input type="number" id="cfg-obs-maxfiles" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                    </div>
+
+                    <!-- Agent -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Agent</h3>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#e2e8f0;">
+                            <input type="checkbox" id="cfg-agent-enabled"> Enabled
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Max Sessions</span>
+                            <input type="number" id="cfg-agent-maxsessions" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Max Tool Rounds</span>
+                            <input type="number" id="cfg-agent-maxrounds" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Session TTL (minutes)</span>
+                            <input type="number" id="cfg-agent-ttl" style="width:100%; margin-top:4px;" min="1">
+                        </label>
+                        <label style="display:block;">
+                            <span style="color:#94a3b8; font-size:12px;">Default Model</span>
+                            <input type="text" id="cfg-agent-model" style="width:100%; margin-top:4px;" placeholder="e.g. llama3:8b">
+                        </label>
+                    </div>
+
+                    <!-- Model Warmer -->
+                    <div class="stat-card">
+                        <h3 style="margin:0 0 16px; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Model Warmer</h3>
+                        <label style="display:block; margin-bottom:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">Interval (seconds, min 10)</span>
+                            <input type="number" id="cfg-warmer-interval" style="width:100%; margin-top:4px;" min="10">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Backends Config -->
+                <div class="stat-card" style="margin-top:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3 style="margin:0; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Backends</h3>
+                        <button class="btn btn-primary btn-sm" onclick="addSettingsBackend()">+ Add Backend</button>
+                    </div>
+                    <table class="data-table" id="settings-backends-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>URL</th>
+                                <th>Priority</th>
+                                <th>Hot Models</th>
+                                <th>Tags</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="settings-backends-body"></tbody>
+                    </table>
+                </div>
+
+                <div style="margin-top:20px; display:flex; gap:12px; justify-content:flex-end;">
+                    <button class="btn btn-secondary" onclick="loadConfig()">Reset</button>
+                    <button class="btn btn-primary" onclick="saveConfig()">Save &amp; Reload</button>
+                </div>
+                <p style="color:#64748b; font-size:12px; margin-top:8px; text-align:right;">
+                    Some settings (host, port, api_key, rate_limit) require a restart to take effect.
+                </p>
+            </div>
+        </div>
+
+        <!-- Session Detail Modal -->
+        <div class="modal-overlay" id="session-modal-overlay">
+            <div class="modal" style="width:700px;max-height:80vh;display:flex;flex-direction:column;">
+                <h2 id="session-modal-title">Session</h2>
+                <div id="session-messages" style="margin-top:16px;flex:1;overflow-y:auto;"></div>
+                <div class="session-send-row">
+                    <input type="text" id="session-send-input" placeholder="Send a message..." onkeydown="if(event.key==='Enter')sendSessionMessage()">
+                    <button onclick="sendSessionMessage()">Send</button>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-cancel" onclick="closeSessionModal()">Close</button>
+                    <button class="btn btn-danger btn-sm" id="session-delete-btn">Delete Session</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer -->
         <div class="footer">
             <span id="last-update">Updating...</span>
-            <span id="version-info">Herd v0.4.1</span>
+            <span class="footer-refresh" id="refresh-countdown">Refreshing in 5s</span>
+            <span id="version-info">Herd Pro v0.1.0</span>
         </div>
     </div>
 
@@ -641,13 +1090,16 @@ Content-Type: application/json
         </div>
     </div>
 
-    <!-- Toast -->
-    <div class="toast" id="toast"></div>
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
 
     <script>
         let timelineChart, modelChart, backendChart;
+        let currentSessionId = null;
         let refreshCountdown = 5;
-        let countdownTimer;
+        let countdownInterval = null;
+        let fleetNodes = [];
+        let fleetRefreshInterval = null;
 
         // -- Tab System --
         function switchTab(name) {
@@ -664,13 +1116,55 @@ Content-Type: application/json
                     backendChart?.resize();
                 }, 50);
             }
+            // Fleet tab: start/stop auto-refresh
+            if (name === 'fleet') {
+                startFleetRefresh();
+            } else {
+                stopFleetRefresh();
+            }
+            // Settings tab: load config
+            if (name === 'settings') {
+                loadConfig();
+            }
         }
 
         // Restore last tab
         const savedTab = sessionStorage.getItem('herd-tab');
         if (savedTab) switchTab(savedTab);
 
-        // -- API Key Auth --
+        // -- Helpers --
+        function formatIdle(seconds) {
+            if (seconds < 60) return `${seconds}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+            return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+        }
+
+        function formatMs(ms) {
+            if (ms < 1000) return `${ms}ms`;
+            return `${(ms / 1000).toFixed(1)}s`;
+        }
+
+        function timeAgo(seconds) {
+            if (seconds < 60) return `${seconds}s ago`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+            return `${Math.floor(seconds / 86400)}d ago`;
+        }
+
+        function gpuClass(pct) {
+            if (pct < 50) return 'low';
+            if (pct < 80) return 'medium';
+            return 'high';
+        }
+
+        function truncate(str, len) {
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         function getApiKey() {
             return localStorage.getItem('herd-api-key') || '';
         }
@@ -692,33 +1186,21 @@ Content-Type: application/json
             return fetch(url, options);
         }
 
-        // -- Helpers --
-        function formatIdle(seconds) {
-            if (seconds < 60) return `${seconds}s`;
-            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-            return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-        }
-
-        function formatMs(ms) {
-            if (ms < 1000) return `${ms}ms`;
-            return `${(ms / 1000).toFixed(1)}s`;
-        }
-
-        function gpuClass(pct) {
-            if (pct < 50) return 'low';
-            if (pct < 80) return 'medium';
-            return 'high';
-        }
-
-        function truncate(str, len) {
-            return str.length > len ? str.substring(0, len) + '...' : str;
-        }
-
+        // -- Toast --
         function showToast(msg, type = 'success') {
-            const t = document.getElementById('toast');
-            t.textContent = msg;
-            t.className = `toast show ${type}`;
-            setTimeout(() => t.className = 'toast', 3000);
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = `toast-item ${type}`;
+            el.textContent = msg;
+            container.appendChild(el);
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => el.classList.add('show'));
+            });
+            setTimeout(() => {
+                el.classList.remove('show');
+                el.addEventListener('transitionend', () => el.remove(), { once: true });
+                setTimeout(() => { if (el.parentNode) el.remove(); }, 400);
+            }, 5000);
         }
 
         // -- Modal --
@@ -772,7 +1254,7 @@ Content-Type: application/json
             const listEl = document.getElementById('model-list');
             listEl.innerHTML = '<div style="font-size:12px; color:#64748b; padding:8px;">Loading models...</div>';
             try {
-                const res = await authFetch(`/admin/backends/${name}/models`);
+                const res = await fetch(`/admin/backends/${name}/models`);
                 const data = await res.json();
                 const models = data.models || [];
                 if (models.length === 0) {
@@ -809,7 +1291,7 @@ Content-Type: application/json
         async function deleteModel(backend, model) {
             if (!confirm(`Delete ${model} from ${backend}?`)) return;
             try {
-                const res = await authFetch(`/admin/backends/${backend}/models/${encodeURIComponent(model)}`, { method: 'DELETE' });
+                const res = await fetch(`/admin/backends/${backend}/models/${encodeURIComponent(model)}`, { method: 'DELETE' });
                 if (res.ok) {
                     showToast(`Deleted ${model}`);
                     loadBackendModels(backend);
@@ -840,7 +1322,7 @@ Content-Type: application/json
             barEl.style.width = '0%';
 
             try {
-                const res = await authFetch(`/admin/backends/${name}/pull`, {
+                const res = await fetch(`/admin/backends/${name}/pull`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({name: model}),
@@ -910,7 +1392,7 @@ Content-Type: application/json
                     const body = { name, url, priority };
                     if (modelFilter) body.model_filter = modelFilter;
                     const res = await authFetch('/admin/backends', {
-                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
                     });
                     if (!res.ok) { const t = await res.text(); throw new Error(t); }
                     showToast(`Added ${name}`);
@@ -920,7 +1402,7 @@ Content-Type: application/json
                     if (vramMb) body.vram_override_mb = vramMb;
                     const originalName = document.getElementById('modal-original-name').value;
                     const res = await authFetch(`/admin/backends/${originalName}`, {
-                        method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+                        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
                     });
                     if (!res.ok) { const t = await res.text(); throw new Error(t); }
                     showToast(`Updated ${originalName}`);
@@ -966,13 +1448,13 @@ Content-Type: application/json
                         <div class="gpu-bar-label"><span>VRAM</span><span>${usedGB}/${totalGB} GB</span></div>
                         <div class="gpu-bar-track"><div class="gpu-bar-fill ${gpuClass(pct)}" style="width:${pct}%"></div></div>
                     </div>
-                    <div class="gpu-stats"><span class="gpu-stat">${g.temperature.toFixed(0)}°C</span></div>
+                    <div class="gpu-stats"><span class="gpu-stat">${g.temperature.toFixed(0)}\u00B0C</span></div>
                 `;
             }
 
             let tagsHtml = '';
             if (b.tags && b.tags.length > 0) {
-                tagsHtml = `<div class="tags-row">${b.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>`;
+                tagsHtml = `<div class="tags-row">${b.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>`;
             }
 
             let idleHtml = '';
@@ -991,13 +1473,13 @@ Content-Type: application/json
             return `
                 <div class="card ${isOnline ? '' : 'offline'}">
                     <div class="card-header">
-                        <span class="card-name">${b.name}</span>
+                        <span class="card-name">${escapeHtml(b.name)}</span>
                         <div class="card-actions">
                             <button class="btn btn-sm" onclick="openEditModal('${b.name}')">Edit</button>
                             <button class="btn btn-sm btn-danger" onclick="removeBackend('${b.name}')">&#x2715;</button>
                         </div>
                     </div>
-                    <div class="card-url">${urlDisplay}</div>
+                    <div class="card-url">${escapeHtml(urlDisplay)}</div>
                     ${tagsHtml}
                     <div class="meta">
                         <span class="meta-item">P: <strong>${b.priority}</strong></span>
@@ -1063,7 +1545,8 @@ Content-Type: application/json
             });
         }
 
-        async function updateCharts() {
+        // -- Update Stats & Charts from Analytics --
+        async function updateAnalytics() {
             try {
                 const res = await fetch('/analytics?hours=24');
                 const data = await res.json();
@@ -1114,6 +1597,7 @@ Content-Type: application/json
             }
         }
 
+        // -- Check for Update --
         async function checkUpdate() {
             try {
                 const res = await fetch('/update');
@@ -1124,8 +1608,10 @@ Content-Type: application/json
                     badge.style.display = 'inline-block';
                     badge.onclick = () => window.open(data.download_url, '_blank');
                 }
-                document.getElementById('version-info').textContent = `Herd v${data.current}`;
-            } catch (e) {}
+                document.getElementById('version-info').textContent = `Herd Pro v${data.current}`;
+            } catch (e) {
+                console.error('Update check failed:', e);
+            }
         }
 
         // -- Main Refresh --
@@ -1137,9 +1623,11 @@ Content-Type: application/json
                     fetch('/gpu').catch(() => null),
                 ]);
                 const data = await statusRes.json();
-                const all = [...(data.healthy_backends || []), ...(data.unhealthy_backends || [])];
+                const healthy = data.healthy_backends || [];
+                const unhealthy = data.unhealthy_backends || [];
+                const all = [...healthy, ...unhealthy];
                 const timeout = data.idle_timeout_minutes || 30;
-                const healthyCount = (data.healthy_backends || []).length;
+                const healthyCount = healthy.length;
 
                 // GPU map
                 let gpuMap = {};
@@ -1172,31 +1660,480 @@ Content-Type: application/json
             }
         }
 
-        // Countdown timer
+        // -- Session Rendering --
+        function renderSessionCard(s) {
+            const age = Math.floor((Date.now() / 1000) - s.created_at);
+            const statusClass = (s.status === 'error' || s.status === 'processing') ? ` ${s.status}` : '';
+            return `
+                <div class="card session-card${statusClass}" onclick="openSessionDetail('${s.id}')">
+                    <div class="card-header">
+                        <span class="card-name">${s.id.substring(0, 8)}\u2026</span>
+                        <span class="session-status ${s.status}">${s.status}</span>
+                    </div>
+                    <div class="session-model">${escapeHtml(s.model)}</div>
+                    <div class="session-meta" style="margin-top:8px;">
+                        <span class="meta-item">Messages: <strong>${s.message_count}</strong></span>
+                        <span class="meta-item"><strong>${timeAgo(age)}</strong></span>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function refreshSessions() {
+            try {
+                const res = await authFetch('/agent/sessions');
+                if (res.status === 404 || res.status === 405) {
+                    document.querySelector('[data-tab="sessions"]').style.display = 'none';
+                    return;
+                }
+                const sessions = await res.json();
+                const grid = document.getElementById('sessions-grid');
+                const countEl = document.getElementById('session-count');
+                const badge = document.getElementById('sessions-tab-badge');
+
+                const activeCount = sessions.filter(s => s.status === 'active' || s.status === 'processing').length;
+                countEl.innerHTML = `${activeCount} active / ${sessions.length} total`;
+                badge.textContent = activeCount;
+
+                if (sessions.length === 0) {
+                    grid.innerHTML = `
+                        <div class="sessions-empty" style="grid-column: 1 / -1;">
+                            <div class="sessions-empty-icon">&#x1F916;</div>
+                            <div class="sessions-empty-title">No active sessions</div>
+                            <div class="sessions-empty-text">
+                                Agent sessions are created via the API. Send a POST request to start a conversation:
+                                <code class="sessions-empty-code">curl -X POST /agent/sessions \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "your-model"}'</code>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    grid.innerHTML = sessions.map(renderSessionCard).join('');
+                }
+
+                // Fetch agent analytics for header stats
+                try {
+                    const agentRes = await authFetch('/analytics/agent');
+                    if (agentRes.ok) {
+                        const agentData = await agentRes.json();
+                        const toolCalls = agentData.total_tool_calls ?? agentData.tool_calls ?? '--';
+                        const denials = agentData.permission_denials ?? agentData.denials ?? '--';
+                        document.getElementById('session-tool-calls').innerHTML = `Tool Calls: <strong>${toolCalls}</strong>`;
+                        document.getElementById('session-denials').innerHTML = `Denials: <strong>${denials}</strong>`;
+                    }
+                } catch (_) { /* agent analytics endpoint may not exist */ }
+
+            } catch (e) {
+                // Agent API likely not enabled, hide tab
+            }
+        }
+
+        // -- Session Detail --
+        function renderMessage(m) {
+            let extra = '';
+            if (m.tool_calls && m.tool_calls.length > 0) {
+                extra = '<div class="msg-tool-calls">Tools: ' +
+                    m.tool_calls.map(tc => `<strong>${escapeHtml(tc.name)}</strong>`).join(', ') + '</div>';
+            }
+            const content = m.content.length > 2000 ? m.content.substring(0, 2000) + '\u2026' : m.content;
+            const isDenied = m.role === 'tool' && /denied|permission denied/i.test(m.content);
+            const deniedClass = isDenied ? ' permission-denied' : '';
+            return `
+                <div class="msg ${m.role}${deniedClass}">
+                    <div class="msg-role">${escapeHtml(m.role)}${m.tool_call_id ? ' (' + escapeHtml(m.tool_call_id) + ')' : ''}</div>
+                    <div class="msg-content">${escapeHtml(content)}</div>
+                    ${extra}
+                </div>
+            `;
+        }
+
+        async function openSessionDetail(id) {
+            currentSessionId = id;
+            try {
+                const res = await authFetch(`/agent/sessions/${id}`);
+                if (!res.ok) { showToast('Session not found', 'error'); return; }
+                const session = await res.json();
+                document.getElementById('session-modal-title').textContent =
+                    `Session ${id.substring(0, 8)}\u2026 (${session.model})`;
+                document.getElementById('session-messages').innerHTML =
+                    session.messages.map(renderMessage).join('');
+                document.getElementById('session-send-input').value = '';
+                document.getElementById('session-delete-btn').onclick = async () => {
+                    if (!confirm('Delete this session?')) return;
+                    try {
+                        const delRes = await authFetch(`/agent/sessions/${id}`, { method: 'DELETE' });
+                        if (!delRes.ok) throw new Error(`Delete failed (${delRes.status})`);
+                        closeSessionModal();
+                        refreshSessions();
+                        showToast('Session deleted');
+                    } catch (delErr) {
+                        showToast(`Failed to delete session: ${delErr.message}`, 'error');
+                    }
+                };
+                document.getElementById('session-modal-overlay').classList.add('active');
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function sendSessionMessage() {
+            if (!currentSessionId) return;
+            const input = document.getElementById('session-send-input');
+            const message = input.value.trim();
+            if (!message) return;
+            input.value = '';
+            try {
+                const res = await authFetch(`/agent/sessions/${currentSessionId}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: message })
+                });
+                if (!res.ok) throw new Error(`Send failed (${res.status})`);
+                showToast('Message sent');
+                // Refresh the modal content
+                openSessionDetail(currentSessionId);
+            } catch (e) {
+                showToast(`Failed to send: ${e.message}`, 'error');
+            }
+        }
+
+        function closeSessionModal() {
+            document.getElementById('session-modal-overlay').classList.remove('active');
+            currentSessionId = null;
+        }
+
+        // -- Fleet Management --
+
+        async function fetchFleetNodes() {
+            try {
+                const resp = await fetch('/api/nodes');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                fleetNodes = data.nodes || [];
+                renderFleetTable();
+            } catch (e) {
+                console.error('Failed to fetch fleet nodes:', e);
+            }
+        }
+
+        function renderFleetTable() {
+            const tbody = document.getElementById('fleet-nodes-body');
+            const countEl = document.getElementById('fleet-count');
+            const badgeEl = document.getElementById('fleet-tab-badge');
+            if (!tbody) return;
+
+            countEl.textContent = `(${fleetNodes.length})`;
+            badgeEl.textContent = fleetNodes.length;
+
+            if (fleetNodes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No nodes registered yet. Download and run herd-tune to add nodes.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = fleetNodes.map(node => {
+                const statusClass = node.status === 'healthy' ? 'status-healthy' :
+                                   node.status === 'degraded' ? 'status-degraded' :
+                                   node.status === 'disabled' ? 'status-disabled' : 'status-unreachable';
+                const statusDot = `<span class="status-dot ${statusClass}"></span>`;
+                const modelsLoaded = (node.models_loaded || []).join(', ') || '\u2014';
+                const vramGB = node.vram_mb ? (node.vram_mb / 1024).toFixed(1) + ' GB' : '\u2014';
+                const ramGB = node.ram_mb ? (node.ram_mb / 1024).toFixed(1) + ' GB' : '\u2014';
+                const enabledToggle = `<label class="toggle-switch">
+                    <input type="checkbox" ${node.enabled ? 'checked' : ''} onchange="toggleNodeEnabled('${node.id}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>`;
+
+                return `<tr class="${!node.enabled ? 'row-disabled' : ''}">
+                    <td><strong>${escapeHtml(node.hostname || '')}</strong><br><small style="color:#64748b;">${escapeHtml(node.ollama_url || '')}</small></td>
+                    <td>${escapeHtml(node.gpu || '\u2014')}</td>
+                    <td>${vramGB}</td>
+                    <td>${ramGB}</td>
+                    <td>${statusDot} ${escapeHtml(node.status || 'unknown')}</td>
+                    <td><small>${escapeHtml(modelsLoaded)}</small></td>
+                    <td>${node.models_available || 0}</td>
+                    <td>${node.max_concurrent || 0}</td>
+                    <td>
+                        <input type="number" class="inline-input" value="${node.priority || 50}" min="1" max="100"
+                            onchange="updateNodePriority('${node.id}', this.value)" style="width:60px">
+                    </td>
+                    <td>
+                        <div class="fleet-actions">
+                            ${enabledToggle}
+                            <button class="btn btn-sm btn-danger" onclick="removeNode('${node.id}', '${escapeHtml(node.hostname || '')}')">&#x2715;</button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function toggleNodeEnabled(id, enabled) {
+            try {
+                await authFetch(`/api/nodes/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled })
+                });
+                fetchFleetNodes();
+            } catch (e) {
+                console.error('Failed to toggle node:', e);
+                showToast('Failed to toggle node', 'error');
+            }
+        }
+
+        async function updateNodePriority(id, priority) {
+            try {
+                await authFetch(`/api/nodes/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ priority: parseInt(priority) })
+                });
+            } catch (e) {
+                console.error('Failed to update priority:', e);
+                showToast('Failed to update priority', 'error');
+            }
+        }
+
+        async function removeNode(id, hostname) {
+            if (!confirm(`Remove node "${hostname}" from fleet?`)) return;
+            try {
+                await authFetch(`/api/nodes/${id}`, { method: 'DELETE' });
+                showToast(`Removed ${hostname}`);
+                fetchFleetNodes();
+            } catch (e) {
+                console.error('Failed to remove node:', e);
+                showToast('Failed to remove node', 'error');
+            }
+        }
+
+        function startFleetRefresh() {
+            fetchFleetNodes();
+            if (fleetRefreshInterval) clearInterval(fleetRefreshInterval);
+            fleetRefreshInterval = setInterval(fetchFleetNodes, 5000);
+        }
+
+        function stopFleetRefresh() {
+            if (fleetRefreshInterval) {
+                clearInterval(fleetRefreshInterval);
+                fleetRefreshInterval = null;
+            }
+        }
+
+        // -- Settings / Config Editor --
+        let settingsBackends = [];
+
+        async function loadConfig() {
+            const resp = await authFetch('/admin/config');
+            if (resp.status === 401) {
+                document.getElementById('settings-locked').style.display = 'block';
+                document.getElementById('settings-form').style.display = 'none';
+                return;
+            }
+            document.getElementById('settings-locked').style.display = 'none';
+            document.getElementById('settings-form').style.display = 'block';
+
+            const config = await resp.json();
+
+            // Server
+            document.getElementById('cfg-server-host').value = config.server?.host || '';
+            document.getElementById('cfg-server-port').value = config.server?.port || 40114;
+            document.getElementById('cfg-server-apikey').value = '';
+            document.getElementById('cfg-server-apikey').placeholder =
+                config.server?.api_key === '********' ? 'Set (leave blank to keep)' : 'Not set';
+            document.getElementById('cfg-server-enrollmentkey').value = '';
+            document.getElementById('cfg-server-enrollmentkey').placeholder =
+                config.server?.enrollment_key === '********' ? 'Set (leave blank to keep)' : 'Auto-generated';
+            document.getElementById('cfg-server-ratelimit').value = config.server?.rate_limit || 0;
+
+            // Show warning if no API key
+            document.getElementById('settings-no-key-warning').style.display =
+                (!config.server?.api_key || config.server?.api_key !== '********') ? 'block' : 'none';
+
+            // Routing
+            document.getElementById('cfg-routing-strategy').value = config.routing?.strategy || 'model_aware';
+            document.getElementById('cfg-routing-timeout').value = config.routing?.timeout || '120s';
+            document.getElementById('cfg-routing-retrycount').value = config.routing?.retry_count ?? 2;
+            document.getElementById('cfg-routing-keepalive').value = config.routing?.default_keep_alive || '5m';
+
+            // Circuit breaker
+            document.getElementById('cfg-cb-threshold').value = config.circuit_breaker?.failure_threshold ?? 5;
+            document.getElementById('cfg-cb-timeout').value = config.circuit_breaker?.timeout || '120s';
+            document.getElementById('cfg-cb-recovery').value = config.circuit_breaker?.recovery_time || '30s';
+
+            // Observability
+            document.getElementById('cfg-obs-metrics').checked = config.observability?.metrics ?? true;
+            document.getElementById('cfg-obs-adminapi').checked = config.observability?.admin_api ?? false;
+            document.getElementById('cfg-obs-tracing').checked = config.observability?.tracing ?? false;
+            document.getElementById('cfg-obs-retention').value = config.observability?.log_retention_days ?? 7;
+            document.getElementById('cfg-obs-maxsize').value = config.observability?.log_max_size_mb ?? 100;
+            document.getElementById('cfg-obs-maxfiles').value = config.observability?.log_max_files ?? 5;
+
+            // Agent
+            document.getElementById('cfg-agent-enabled').checked = config.agent?.enabled ?? false;
+            document.getElementById('cfg-agent-maxsessions').value = config.agent?.max_sessions ?? 100;
+            document.getElementById('cfg-agent-maxrounds').value = config.agent?.max_tool_rounds ?? 10;
+            document.getElementById('cfg-agent-ttl').value = config.agent?.session_ttl_minutes ?? 60;
+            document.getElementById('cfg-agent-model').value = config.agent?.default_model || '';
+
+            // Model warmer
+            document.getElementById('cfg-warmer-interval').value = config.model_warmer?.interval_secs ?? 240;
+
+            // Backends
+            settingsBackends = (config.backends || []).map(b => ({...b}));
+            renderSettingsBackends();
+        }
+
+        function renderSettingsBackends() {
+            const tbody = document.getElementById('settings-backends-body');
+            if (!settingsBackends.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No backends configured.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = settingsBackends.map((b, i) => `<tr>
+                <td><input type="text" value="${escapeHtml(b.name)}" onchange="settingsBackends[${i}].name=this.value" style="width:100%;"></td>
+                <td><input type="text" value="${escapeHtml(b.url)}" onchange="settingsBackends[${i}].url=this.value" style="width:100%;"></td>
+                <td><input type="number" value="${b.priority}" onchange="settingsBackends[${i}].priority=parseInt(this.value)" style="width:60px;" min="0"></td>
+                <td><input type="text" value="${(b.hot_models||[]).join(', ')}" onchange="settingsBackends[${i}].hot_models=this.value.split(',').map(s=>s.trim()).filter(Boolean)" style="width:100%;"></td>
+                <td><input type="text" value="${(b.tags||[]).join(', ')}" onchange="settingsBackends[${i}].tags=this.value.split(',').map(s=>s.trim()).filter(Boolean)" style="width:100%;"></td>
+                <td><button class="btn btn-danger btn-sm" onclick="settingsBackends.splice(${i},1);renderSettingsBackends()">Remove</button></td>
+            </tr>`).join('');
+        }
+
+        function addSettingsBackend() {
+            settingsBackends.push({ name: '', url: '', priority: 50, hot_models: [], tags: [] });
+            renderSettingsBackends();
+            // Focus the new name field
+            const rows = document.querySelectorAll('#settings-backends-body tr');
+            const lastRow = rows[rows.length - 1];
+            if (lastRow) lastRow.querySelector('input')?.focus();
+        }
+
+        function buildConfigFromForm() {
+            const apiKeyInput = document.getElementById('cfg-server-apikey').value;
+            let apiKey;
+            if (apiKeyInput) {
+                apiKey = apiKeyInput;
+            } else {
+                // Blank = keep existing (send sentinel)
+                apiKey = document.getElementById('cfg-server-apikey').placeholder.startsWith('Set') ? '********' : null;
+            }
+
+            return {
+                server: {
+                    host: document.getElementById('cfg-server-host').value,
+                    port: parseInt(document.getElementById('cfg-server-port').value) || 40114,
+                    api_key: apiKey,
+                    enrollment_key: (() => {
+                        const v = document.getElementById('cfg-server-enrollmentkey').value;
+                        if (v) return v;
+                        return document.getElementById('cfg-server-enrollmentkey').placeholder.startsWith('Set') ? '********' : null;
+                    })(),
+                    rate_limit: parseInt(document.getElementById('cfg-server-ratelimit').value) || 0,
+                },
+                routing: {
+                    strategy: document.getElementById('cfg-routing-strategy').value,
+                    timeout: document.getElementById('cfg-routing-timeout').value,
+                    retry_count: parseInt(document.getElementById('cfg-routing-retrycount').value) || 0,
+                    default_keep_alive: document.getElementById('cfg-routing-keepalive').value,
+                },
+                circuit_breaker: {
+                    failure_threshold: parseInt(document.getElementById('cfg-cb-threshold').value) || 5,
+                    timeout: document.getElementById('cfg-cb-timeout').value,
+                    recovery_time: document.getElementById('cfg-cb-recovery').value,
+                },
+                observability: {
+                    metrics: document.getElementById('cfg-obs-metrics').checked,
+                    admin_api: document.getElementById('cfg-obs-adminapi').checked,
+                    tracing: document.getElementById('cfg-obs-tracing').checked,
+                    log_retention_days: parseInt(document.getElementById('cfg-obs-retention').value) || 7,
+                    log_max_size_mb: parseInt(document.getElementById('cfg-obs-maxsize').value) || 100,
+                    log_max_files: parseInt(document.getElementById('cfg-obs-maxfiles').value) || 5,
+                },
+                agent: {
+                    enabled: document.getElementById('cfg-agent-enabled').checked,
+                    max_sessions: parseInt(document.getElementById('cfg-agent-maxsessions').value) || 100,
+                    max_tool_rounds: parseInt(document.getElementById('cfg-agent-maxrounds').value) || 10,
+                    session_ttl_minutes: parseInt(document.getElementById('cfg-agent-ttl').value) || 60,
+                    default_model: document.getElementById('cfg-agent-model').value || null,
+                    permissions: { deny_file_patterns: [], deny_bash_patterns: [], allow_shell_commands: false },
+                },
+                model_warmer: {
+                    interval_secs: parseInt(document.getElementById('cfg-warmer-interval').value) || 240,
+                },
+                backends: settingsBackends,
+            };
+        }
+
+        async function saveConfig() {
+            const config = buildConfigFromForm();
+            const resp = await authFetch('/admin/config', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config),
+            });
+            if (resp.ok) {
+                const result = await resp.json();
+                showToast(result.message || 'Config saved and reloaded');
+                // If user set a new API key, store it in the dashboard
+                const newKey = document.getElementById('cfg-server-apikey').value;
+                if (newKey) {
+                    setApiKey(newKey);
+                    document.getElementById('api-key-input').value = newKey;
+                }
+                loadConfig(); // refresh form
+            } else {
+                const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
+                showToast(err.error || 'Save failed', 'error');
+            }
+        }
+
+        // -- Countdown Timer --
         function startCountdown() {
-            clearInterval(countdownTimer);
-            countdownTimer = setInterval(() => {
+            refreshCountdown = 5;
+            updateCountdownDisplay();
+            if (countdownInterval) clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
                 refreshCountdown--;
-                if (refreshCountdown <= 0) refreshCountdown = 5;
+                if (refreshCountdown <= 0) {
+                    refreshCountdown = 5;
+                }
+                updateCountdownDisplay();
             }, 1000);
         }
 
-        // Close modal on escape
-        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+        function updateCountdownDisplay() {
+            document.getElementById('refresh-countdown').textContent = `Refreshing in ${refreshCountdown}s`;
+        }
+
+        // -- Keyboard & Click Handlers --
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { closeModal(); closeSessionModal(); }
+        });
         document.getElementById('modal-overlay').addEventListener('click', e => {
             if (e.target === e.currentTarget) closeModal();
         });
+        document.getElementById('session-modal-overlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeSessionModal();
+        });
 
-        // Initialize
+        // -- Initialize --
         initCharts();
+        // Restore API key
         const savedKey = getApiKey();
         if (savedKey) document.getElementById('api-key-input').value = savedKey;
         refresh();
-        updateCharts();
+        updateAnalytics();
         checkUpdate();
+        refreshSessions();
+        fetchFleetNodes(); // initial badge count
         startCountdown();
+
+        // If fleet tab was last active, start its auto-refresh
+        if (savedTab === 'fleet') startFleetRefresh();
+
         setInterval(refresh, 5000);
-        setInterval(updateCharts, 30000);
+        setInterval(updateAnalytics, 30000);
+        setInterval(refreshSessions, 10000);
     </script>
 </body>
 </html>
