@@ -188,7 +188,7 @@ async fn execute_list_files(args: &serde_json::Value) -> ToolResult {
             let mut names = Vec::new();
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let file_type = entry.file_type().await.ok();
-                let suffix = if file_type.map_or(false, |t| t.is_dir()) {
+                let suffix = if file_type.is_some_and(|t| t.is_dir()) {
                     "/"
                 } else {
                     ""

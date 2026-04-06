@@ -124,15 +124,11 @@ pub fn classify_by_keywords(
     }
 
     // No keyword match — use default tier if configured
-    if let Some(default_tier) = config.tiers.get(&config.default_tier) {
-        Some(ClassificationResult {
-            tier: config.default_tier.clone(),
-            model: default_tier.model.clone(),
-            classified_by: "default".to_string(),
-        })
-    } else {
-        None // Default tier not in tiers map, skip classification
-    }
+    config.tiers.get(&config.default_tier).map(|default_tier| ClassificationResult {
+        tier: config.default_tier.clone(),
+        model: default_tier.model.clone(),
+        classified_by: "default".to_string(),
+    })
 }
 
 #[cfg(test)]

@@ -365,7 +365,7 @@ impl Default for AgentConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PermissionsConfig {
     #[serde(default)]
     pub deny_file_patterns: Vec<String>,
@@ -375,16 +375,6 @@ pub struct PermissionsConfig {
 
     #[serde(default)]
     pub allow_shell_commands: bool,
-}
-
-impl Default for PermissionsConfig {
-    fn default() -> Self {
-        Self {
-            deny_file_patterns: Vec::new(),
-            deny_bash_patterns: Vec::new(),
-            allow_shell_commands: false,
-        }
-    }
 }
 
 fn default_max_sessions() -> usize {

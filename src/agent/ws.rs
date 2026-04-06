@@ -75,7 +75,7 @@ async fn handle_ws(mut socket: WebSocket, state: AppState, session_id: String) {
                     "session_id": session_id,
                     "error": format!("Invalid message format: {}", e),
                 });
-                let _ = socket.send(Message::Text(err.to_string().into())).await;
+                let _ = socket.send(Message::Text(err.to_string())).await;
                 continue;
             }
         };
@@ -89,7 +89,7 @@ async fn handle_ws(mut socket: WebSocket, state: AppState, session_id: String) {
                     "session_id": session_id,
                     "error": "Session not found",
                 });
-                let _ = socket.send(Message::Text(err.to_string().into())).await;
+                let _ = socket.send(Message::Text(err.to_string())).await;
                 break;
             }
         };
@@ -103,7 +103,7 @@ async fn handle_ws(mut socket: WebSocket, state: AppState, session_id: String) {
                     "session_id": session_id,
                     "error": "Session not found",
                 });
-                let _ = socket.send(Message::Text(err.to_string().into())).await;
+                let _ = socket.send(Message::Text(err.to_string())).await;
                 break;
             }
         };
@@ -136,7 +136,7 @@ async fn handle_ws(mut socket: WebSocket, state: AppState, session_id: String) {
                 Ok(j) => j,
                 Err(_) => continue,
             };
-            if socket.send(Message::Text(json.into())).await.is_err() {
+            if socket.send(Message::Text(json)).await.is_err() {
                 tracing::debug!("WebSocket send failed for session {}", session_id);
                 return; // Client disconnected
             }
