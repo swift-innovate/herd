@@ -1,5 +1,7 @@
+use crate::agent::{AgentAudit, SessionStore};
+use crate::agent::ws as agent_ws;
 use crate::analytics::{Analytics, RequestLog};
-use crate::api::{admin, openai};
+use crate::api::{admin, agent, openai};
 use crate::backend::{BackendPool, HealthChecker, ModelDiscovery, ModelWarmer};
 use crate::config::{parse_duration, Config};
 use crate::router::{create_router, Router};
@@ -33,6 +35,9 @@ pub struct AppState {
     pub config: Arc<tokio::sync::RwLock<Config>>,
     pub analytics: Arc<Analytics>,
     pub metrics: Arc<crate::metrics::Metrics>,
+    pub session_store: Arc<SessionStore>,
+    pub agent_audit: Arc<AgentAudit>,
+    pub node_db: Arc<crate::nodes::NodeDb>,
     pub routing_timeout_ms: Arc<AtomicU64>,
     pub routing_retry_count: Arc<AtomicU32>,
     pub config_path: Option<PathBuf>,
@@ -176,7 +181,7 @@ impl Server {
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         let addr = format!("{}:{}", self.config.server.host, self.config.server.port);
         info!(
             "Starting Herd on {} with {} backends",
@@ -202,6 +207,17 @@ impl Server {
             false
         } else {
             self.config.observability.admin_api
+        };
+
+        let agent_enabled = if self.config.agent.enabled
+            && self.config.server.api_key.is_none()
+        {
+            tracing::warn!(
+                "agent is enabled but server.api_key is not set — disabling agent API"
+            );
+            false
+        } else {
+            self.config.agent.enabled
         };
 
         // Create backend pool with circuit breaker config
@@ -280,6 +296,31 @@ impl Server {
                 .build()?,
         );
 
+        // Initialize agent session store and audit log
+        let session_store = if agent_enabled {
+            let session_dir = dirs::home_dir()
+                .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
+                .join(".herd")
+                .join("sessions");
+            Arc::new(SessionStore::persistent(self.config.agent.max_sessions, session_dir)?)
+        } else {
+            Arc::new(SessionStore::new(self.config.agent.max_sessions))
+        };
+        let agent_audit = Arc::new(AgentAudit::new()?);
+
+        // Auto-generate enrollment_key if not set
+        if self.config.server.enrollment_key.is_none() {
+            let key = uuid::Uuid::new_v4().to_string();
+            tracing::info!("No enrollment_key configured. Auto-generated: {}", key);
+            self.config.server.enrollment_key = Some(key);
+        }
+
+        let node_db = Arc::new(crate::nodes::NodeDb::open()?);
+
+        // Start node health poller (polls registered nodes every 10s, tags every 60s)
+        let node_poller = crate::nodes::NodeHealthPoller::new(10, 60);
+        node_poller.spawn(Arc::clone(&node_db), Arc::clone(&pool));
+
         let state = AppState {
             pool: Arc::clone(&pool),
             router: Arc::new(tokio::sync::RwLock::new(router)),
@@ -287,11 +328,34 @@ impl Server {
             mgmt_client,
             config: Arc::new(tokio::sync::RwLock::new(self.config.clone())),
             analytics,
+            session_store,
+            agent_audit,
             metrics,
+            node_db,
             routing_timeout_ms: Arc::new(AtomicU64::new(routing_timeout.as_millis() as u64)),
             routing_retry_count: Arc::new(AtomicU32::new(self.config.routing.retry_count)),
             config_path: self.config_path.clone(),
         };
+
+        // Start session reaper and audit log cleanup (every 5 minutes)
+        if agent_enabled {
+            let ttl_secs = (self.config.agent.session_ttl_minutes * 60) as i64;
+            let store_clone = Arc::clone(&state.session_store);
+            let audit_clone = Arc::clone(&state.agent_audit);
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(300));
+                loop {
+                    ticker.tick().await;
+                    let removed = store_clone.reap_expired(ttl_secs).await;
+                    if removed > 0 {
+                        tracing::info!("Session reaper removed {} expired sessions", removed);
+                    }
+                    if let Err(e) = audit_clone.cleanup_old(7 * 24 * 3600).await {
+                        tracing::error!("Audit log cleanup failed: {}", e);
+                    }
+                }
+            });
+        }
 
         // Build app with routes
         let mut app = axum::Router::new()
@@ -313,13 +377,38 @@ impl Server {
             .route("/gpu", axum::routing::get(gpu_handler))
             // Agent skills reference
             .route("/skills", axum::routing::get(skills_handler))
-            .route("/skills.md", axum::routing::get(skills_md_handler));
+            .route("/skills.md", axum::routing::get(skills_md_handler))
+            // herd-tune script download (no auth)
+            .route(
+                "/api/nodes/script",
+                axum::routing::get(crate::api::nodes::download_script),
+            )
+            // Node registration (enrollment key auth — called by herd-tune scripts)
+            .route(
+                "/api/nodes/register",
+                axum::routing::post(crate::api::nodes::register_node),
+            )
+            // Node management (public — dashboard uses these)
+            .route(
+                "/api/nodes",
+                axum::routing::get(crate::api::nodes::list_nodes),
+            )
+            .route(
+                "/api/nodes/:id",
+                axum::routing::get(crate::api::nodes::get_node)
+                    .put(crate::api::nodes::update_node)
+                    .delete(crate::api::nodes::delete_node),
+            );
 
         // Conditionally mount metrics
         if self.config.observability.metrics {
             app = app
                 .route("/metrics", axum::routing::get(metrics_handler))
-                .route("/analytics", axum::routing::get(analytics_handler));
+                .route("/analytics", axum::routing::get(analytics_handler))
+                .route(
+                    "/analytics/agent",
+                    axum::routing::get(agent_analytics_handler),
+                );
         }
 
         // Conditionally mount admin API (requires auth)
@@ -355,6 +444,42 @@ impl Server {
                 .nest("/admin/backends", admin_routes)
                 .merge(reload_route);
         }
+
+        // Conditionally mount agent API (requires auth)
+        if agent_enabled {
+            let auth_layer = axum::middleware::from_fn_with_state(state.clone(), require_api_key);
+            let agent_routes = axum::Router::new()
+                .route(
+                    "/agent/sessions",
+                    axum::routing::get(agent::list_sessions).post(agent::create_session),
+                )
+                .route(
+                    "/agent/sessions/:id",
+                    axum::routing::get(agent::get_session).delete(agent::delete_session),
+                )
+                .route(
+                    "/agent/sessions/:id/messages",
+                    axum::routing::post(agent::send_message),
+                )
+                .route(
+                    "/agent/sessions/:id/ws",
+                    axum::routing::get(agent_ws::ws_handler),
+                )
+                .layer(auth_layer);
+            app = app.merge(agent_routes);
+        }
+
+        // Config editor — always mounted (bootstrap mode for containerized deploys)
+        let config_routes = axum::Router::new()
+            .route(
+                "/admin/config",
+                axum::routing::get(admin::get_config).put(admin::update_config),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_api_key,
+            ));
+        app = app.merge(config_routes);
 
         // Clone state for file watcher before it's consumed by with_state()
         let watcher_state = state.clone();
@@ -510,7 +635,7 @@ fn extract_api_key(req: &axum::extract::Request) -> Option<String> {
     None
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -945,6 +1070,29 @@ async fn analytics_handler(
     }
 }
 
+async fn agent_analytics_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::Json<serde_json::Value> {
+    let hours = params
+        .get("hours")
+        .and_then(|h| h.parse::<i64>().ok())
+        .unwrap_or(24)
+        .clamp(1, 168);
+
+    let seconds = hours * 3600;
+
+    match state.agent_audit.get_stats(seconds).await {
+        Ok(stats) => axum::Json(
+            serde_json::to_value(&stats)
+                .unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"})),
+        ),
+        Err(e) => axum::Json(serde_json::json!({
+            "error": format!("Failed to get agent analytics: {}", e)
+        })),
+    }
+}
+
 async fn reload_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Result<axum::Json<serde_json::Value>, (axum::http::StatusCode, String)> {
@@ -1252,7 +1400,10 @@ mod tests {
             mgmt_client: Arc::new(reqwest::Client::new()),
             config: Arc::new(tokio::sync::RwLock::new(initial)),
             analytics: Arc::new(Analytics::new().unwrap()),
+            session_store: Arc::new(SessionStore::new(100)),
+            agent_audit: Arc::new(AgentAudit::new().unwrap()),
             metrics: Arc::new(crate::metrics::Metrics::new()),
+            node_db: Arc::new(crate::nodes::NodeDb::open().unwrap()),
             routing_timeout_ms: Arc::new(AtomicU64::new(1_000)),
             routing_retry_count: Arc::new(AtomicU32::new(1)),
             config_path: Some(temp_path.clone()),

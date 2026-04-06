@@ -347,3 +347,88 @@ pub async fn list_backend_models(
         "models": data.get("models").cloned().unwrap_or(serde_json::json!([])),
     })))
 }
+
+// ---------------------------------------------------------------------------
+// Config editor endpoints
+// ---------------------------------------------------------------------------
+
+/// GET /admin/config — Return current config as JSON (api_key redacted).
+pub async fn get_config(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = state.config_snapshot().await;
+    let mut json = serde_json::to_value(&config).unwrap_or_default();
+    // Redact secrets — show presence but not value
+    if let Some(server) = json.get_mut("server") {
+        for field in &["api_key", "enrollment_key"] {
+            if let Some(key) = server.get(*field) {
+                if key.is_string() {
+                    server[*field] = serde_json::json!("********");
+                }
+            }
+        }
+    }
+    Json(json)
+}
+
+/// PUT /admin/config — Validate, write to disk, and hot-reload.
+pub async fn update_config(
+    State(state): State<AppState>,
+    Json(mut new_config): Json<crate::config::Config>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // If secrets are the redacted sentinel, preserve existing values
+    let current = state.config_snapshot().await;
+    if new_config.server.api_key.as_deref() == Some("********") {
+        new_config.server.api_key = current.server.api_key.clone();
+    }
+    if new_config.server.enrollment_key.as_deref() == Some("********") {
+        new_config.server.enrollment_key = current.server.enrollment_key.clone();
+    }
+    drop(current);
+
+    // Validate before writing
+    new_config.validate().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+
+    // Write to disk (atomic: temp file + rename)
+    let path = state.config_path.as_ref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No config file path — server was started without a config file"})),
+        )
+    })?;
+
+    let yaml = new_config.to_yaml().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to serialize config: {}", e)})),
+        )
+    })?;
+
+    let temp_path = path.with_extension("yaml.tmp");
+    tokio::fs::write(&temp_path, &yaml).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to write config: {}", e)})),
+        )
+    })?;
+    tokio::fs::rename(&temp_path, path).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to save config: {}", e)})),
+        )
+    })?;
+
+    // Trigger hot-reload
+    let msg = state.reload_config().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Config saved but reload failed: {}", e)})),
+        )
+    })?;
+
+    tracing::info!("Config updated via dashboard: {}", msg);
+    Ok(Json(serde_json::json!({"status": "ok", "message": msg})))
+}

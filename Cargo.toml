@@ -1,6 +1,6 @@
 [package]
 name = "herd"
-version = "0.5.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["Swift Innovative Technologies"]
 description = "Intelligent Ollama router with GPU awareness"
@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 reqwest = { version = "0.11", features = ["json", "stream"] }
@@ -29,6 +29,7 @@ chrono = "0.4"
 dirs = "5.0"
 uuid = { version = "1", features = ["v4"] }
 self_update = { version = "0.42", features = ["archive-zip", "archive-tar", "compression-flate2", "compression-zip-deflate"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

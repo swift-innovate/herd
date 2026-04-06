@@ -27,6 +27,9 @@ pub struct Config {
 
     #[serde(default)]
     pub task_classifier: TaskClassifierConfig,
+
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +43,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub api_key: Option<String>,
 
+    /// Enrollment key required for node registration. Auto-generated if not set.
+    #[serde(default)]
+    pub enrollment_key: Option<String>,
+
     /// Global rate limit in requests per second. 0 = unlimited.
     #[serde(default)]
     pub rate_limit: u64,
@@ -51,6 +58,7 @@ impl Default for ServerConfig {
             host: default_host(),
             port: default_port(),
             api_key: None,
+            enrollment_key: None,
             rate_limit: 0,
         }
     }
@@ -310,6 +318,72 @@ pub struct TierConfig {
     #[serde(default)]
     pub keywords: Vec<String>,
     pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
+
+    #[serde(default = "default_max_tool_rounds")]
+    pub max_tool_rounds: u32,
+
+    #[serde(default)]
+    pub default_model: Option<String>,
+
+    #[serde(default)]
+    pub permissions: PermissionsConfig,
+
+    #[serde(default = "default_session_ttl")]
+    pub session_ttl_minutes: u64,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_sessions: default_max_sessions(),
+            max_tool_rounds: default_max_tool_rounds(),
+            default_model: None,
+            permissions: PermissionsConfig::default(),
+            session_ttl_minutes: default_session_ttl(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionsConfig {
+    #[serde(default)]
+    pub deny_file_patterns: Vec<String>,
+
+    #[serde(default)]
+    pub deny_bash_patterns: Vec<String>,
+
+    #[serde(default)]
+    pub allow_shell_commands: bool,
+}
+
+impl Default for PermissionsConfig {
+    fn default() -> Self {
+        Self {
+            deny_file_patterns: Vec::new(),
+            deny_bash_patterns: Vec::new(),
+            allow_shell_commands: false,
+        }
+    }
+}
+
+fn default_max_sessions() -> usize {
+    100
+}
+fn default_max_tool_rounds() -> u32 {
+    10
+}
+fn default_session_ttl() -> u64 {
+    60
 }
 
 impl Config {

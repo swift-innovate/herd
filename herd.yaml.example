@@ -109,3 +109,21 @@ observability:
   log_retention_days: 7          # Auto-prune JSONL request logs older than N days (default: 7)
   log_max_size_mb: 100           # Rotate log file when it exceeds N MB (default: 100, 0 = no limit)
   log_max_files: 5               # Keep up to N rotated log files (default: 5)
+
+# === AGENT ===
+# Built-in agent session management with tool calling and permission controls.
+# Off by default. Requires api_key to be set.
+
+# agent:
+#   enabled: false
+#   max_sessions: 100               # Maximum concurrent agent sessions
+#   max_tool_rounds: 10             # Max tool-call iterations per message
+#   session_ttl_minutes: 60         # Auto-expire idle sessions after this duration
+#   permissions:
+#     allow_shell_commands: false    # Enable run_command tool (default: false)
+#     deny_file_patterns:           # Regex patterns blocking file access
+#       - "\.env$"
+#       - "\.ssh/"
+#     deny_bash_patterns:           # Regex patterns blocking shell commands
+#       - "^rm\\s+-rf"
+#       - "^sudo"
