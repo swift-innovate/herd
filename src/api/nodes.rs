@@ -220,7 +220,7 @@ pub async fn download_script(
     };
 
     // Determine public URL: prefer explicit env var, fall back to Host header
-    let public_url = std::env::var("HERD_PRO_PUBLIC_URL")
+    let public_url = std::env::var("HERD_PUBLIC_URL")
         .ok()
         .unwrap_or_else(|| {
             let host = req
@@ -236,7 +236,7 @@ pub async fn download_script(
     drop(config);
 
     let script = template
-        .replace("%%HERD_PRO_ENDPOINT%%", public_url.trim_end_matches('/'))
+        .replace("%%HERD_ENDPOINT%%", public_url.trim_end_matches('/'))
         .replace("%%ENROLLMENT_KEY%%", &enrollment_key);
 
     let response = axum::response::Response::builder()

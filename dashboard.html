@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herd Pro Dashboard</title>
+    <title>Herd Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -538,7 +538,7 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1><span>&#x1F999;</span> Herd Pro</h1>
+            <h1><span>&#x1F999;</span> Herd</h1>
             <div class="header-right">
                 <div class="header-meta">
                     <span class="strategy-badge" id="strategy">--</span>
@@ -787,7 +787,7 @@ Content-Type: application/json
         <div class="tab-content" id="tab-fleet">
             <div class="fleet-add-node">
                 <h3>Add Node to Fleet</h3>
-                <p>Run the herd-tune script on any machine with Ollama to auto-detect hardware and register with this Herd Pro instance.</p>
+                <p>Run the herd-tune script on any machine with Ollama to auto-detect hardware and register with this Herd instance.</p>
 
                 <div class="script-download-buttons">
                     <a href="/api/nodes/script?os=windows" class="btn btn-primary" download>
@@ -1041,7 +1041,7 @@ Content-Type: application/json
         <div class="footer">
             <span id="last-update">Updating...</span>
             <span class="footer-refresh" id="refresh-countdown">Refreshing in 5s</span>
-            <span id="version-info">Herd Pro v0.1.0</span>
+            <span id="version-info">Herd</span>
         </div>
     </div>
 
@@ -1608,7 +1608,7 @@ Content-Type: application/json
                     badge.style.display = 'inline-block';
                     badge.onclick = () => window.open(data.download_url, '_blank');
                 }
-                document.getElementById('version-info').textContent = `Herd Pro v${data.current}`;
+                document.getElementById('version-info').textContent = `Herd v${data.current}`;
             } catch (e) {
                 console.error('Update check failed:', e);
             }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Herd Pro Registration (auto-configured on download) ──
-HERD_PRO_ENDPOINT="%%HERD_PRO_ENDPOINT%%"
+# ── Herd Registration (auto-configured on download) ──
+HERD_ENDPOINT="%%HERD_ENDPOINT%%"
 ENROLLMENT_KEY="%%ENROLLMENT_KEY%%"
 HERD_TUNE_VERSION="0.8.0"
 APPLY=false
@@ -11,14 +11,14 @@ APPLY=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --apply) APPLY=true; shift ;;
-        --herd-pro) HERD_PRO_ENDPOINT="$2"; shift 2 ;;
-        --herd-pro=*) HERD_PRO_ENDPOINT="${1#*=}"; shift ;;
+        --herd) HERD_ENDPOINT="$2"; shift 2 ;;
+        --herd=*) HERD_ENDPOINT="${1#*=}"; shift ;;
         --enrollment-key) ENROLLMENT_KEY="$2"; shift 2 ;;
         --enrollment-key=*) ENROLLMENT_KEY="${1#*=}"; shift ;;
         -h|--help)
-            echo "Usage: $0 [--apply] [--herd-pro URL] [--enrollment-key KEY]"
+            echo "Usage: $0 [--apply] [--herd URL] [--enrollment-key KEY]"
             echo "  --apply           Apply recommended OLLAMA_* env vars and restart Ollama"
-            echo "  --herd-pro        Herd Pro endpoint URL for registration"
+            echo "  --herd            Herd endpoint URL for registration"
             echo "  --enrollment-key  Enrollment key for node registration"
             exit 0
             ;;
@@ -165,13 +165,13 @@ else
     NODE_ID=$(echo -n "${MAC}$(hostname)" | sha256sum | cut -d' ' -f1 | head -c 32)
 fi
 
-# ── Register with Herd Pro ──
-if [ -n "$HERD_PRO_ENDPOINT" ] && [ "$HERD_PRO_ENDPOINT" != '%%HERD_PRO_ENDPOINT%%' ]; then
+# ── Register with Herd ──
+if [ -n "$HERD_ENDPOINT" ] && [ "$HERD_ENDPOINT" != '%%HERD_ENDPOINT%%' ]; then
     echo ""
-    echo "=== Registering with Herd Pro ==="
-    echo "  Endpoint: ${HERD_PRO_ENDPOINT}"
+    echo "=== Registering with Herd ==="
+    echo "  Endpoint: ${HERD_ENDPOINT}"
 
-    REG_URL="${HERD_PRO_ENDPOINT}/api/nodes/register"
+    REG_URL="${HERD_ENDPOINT}/api/nodes/register"
     if [ -n "$ENROLLMENT_KEY" ] && [ "$ENROLLMENT_KEY" != '%%ENROLLMENT_KEY%%' ]; then
         REG_URL="${REG_URL}?enrollment_key=${ENROLLMENT_KEY}"
     fi
@@ -219,11 +219,11 @@ JSONEOF
         echo "  Registration successful!"
         echo "  $RESPONSE"
     else
-        echo "  WARNING: Registration failed. You can register later with --herd-pro <url>"
+        echo "  WARNING: Registration failed. You can register later with --herd <url>"
     fi
 else
     echo ""
-    echo "No Herd Pro endpoint configured. Run with --herd-pro <url> to register."
+    echo "No Herd endpoint configured. Run with --herd <url> to register."
 fi
 
 echo ""

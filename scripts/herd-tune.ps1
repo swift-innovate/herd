@@ -1,32 +1,32 @@
 <#
 .SYNOPSIS
-    herd-tune — Detect GPU/VRAM/RAM, configure Ollama, and register with Herd Pro.
+    herd-tune — Detect GPU/VRAM/RAM, configure Ollama, and register with Herd.
 .DESCRIPTION
     Run on any Windows machine with Ollama installed to auto-detect hardware,
-    apply recommended Ollama environment variables, and register with a Herd Pro instance.
+    apply recommended Ollama environment variables, and register with a Herd instance.
 .PARAMETER Apply
     Apply recommended OLLAMA_* environment variables and restart the Ollama service.
     Requires administrator privileges.
-.PARAMETER HerdPro
-    Override the Herd Pro endpoint URL (default: baked in at download time).
+.PARAMETER Herd
+    Override the Herd endpoint URL (default: baked in at download time).
 #>
 [CmdletBinding()]
 param(
     [switch]$Apply,
-    [string]$HerdPro
+    [string]$Herd
 )
 
-# ── Herd Pro Registration (auto-configured on download) ──
-$HerdProEndpoint = "%%HERD_PRO_ENDPOINT%%"
+# ── Herd Registration (auto-configured on download) ──
+$HerdEndpoint = "%%HERD_ENDPOINT%%"
 $EnrollmentKey = "%%ENROLLMENT_KEY%%"
 $HerdTuneVersion = "0.8.0"
 
-# -HerdPro parameter overrides the baked-in endpoint.
-# Also check HERD_PRO_URL env var as fallback (useful for containers/CI).
-if ($HerdPro) {
-    $HerdProEndpoint = $HerdPro
-} elseif ($env:HERD_PRO_URL) {
-    $HerdProEndpoint = $env:HERD_PRO_URL
+# -Herd parameter overrides the baked-in endpoint.
+# Also check HERD_URL env var as fallback (useful for containers/CI).
+if ($Herd) {
+    $HerdEndpoint = $Herd
+} elseif ($env:HERD_URL) {
+    $HerdEndpoint = $env:HERD_URL
 }
 
 # ── Require admin only when -Apply is used ──
@@ -35,8 +35,8 @@ if ($Apply) {
     if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         # Re-launch elevated, forwarding arguments
         $argList = "-ExecutionPolicy Bypass -File `"$PSCommandPath`" -Apply"
-        if ($HerdProEndpoint -and $HerdProEndpoint -ne '%%HERD_PRO_ENDPOINT%%') {
-            $argList += " -HerdPro `"$HerdProEndpoint`""
+        if ($HerdEndpoint -and $HerdEndpoint -ne '%%HERD_ENDPOINT%%') {
+            $argList += " -Herd `"$HerdEndpoint`""
         }
         Start-Process powershell.exe -Verb RunAs -ArgumentList $argList -Wait
         exit $LASTEXITCODE
@@ -263,10 +263,10 @@ try {
     }
 } catch {}
 
-# Register with Herd Pro
+# Register with Herd
 $regEndpoint = $null
-if ($HerdProEndpoint -and $HerdProEndpoint -notmatch 'HERD_PRO_ENDPOINT') {
-    $regEndpoint = $HerdProEndpoint
+if ($HerdEndpoint -and $HerdEndpoint -notmatch 'HERD_ENDPOINT') {
+    $regEndpoint = $HerdEndpoint
 }
 
 if ($regEndpoint) {
@@ -275,7 +275,7 @@ if ($regEndpoint) {
         $regUrl += "?enrollment_key=$EnrollmentKey"
     }
 
-    Write-Host "`n=== Registering with Herd Pro ===" -ForegroundColor Cyan
+    Write-Host "`n=== Registering with Herd ===" -ForegroundColor Cyan
     Write-Host "  Endpoint: $regEndpoint"
 
     $payloadObj = @{
@@ -303,10 +303,10 @@ if ($regEndpoint) {
         Write-Host "  $($response.message)" -ForegroundColor Green
     } catch {
         Write-Warning "Registration failed: $_"
-        Write-Host "  You can register manually later by re-running this script with -HerdPro <url>"
+        Write-Host "  You can register manually later by re-running this script with -Herd <url>"
     }
 } else {
-    Write-Host "`nNo Herd Pro endpoint configured. Run with -HerdPro <url> to register." -ForegroundColor Yellow
+    Write-Host "`nNo Herd endpoint configured. Run with -Herd <url> to register." -ForegroundColor Yellow
 }
 
 Write-Host "`nDone!" -ForegroundColor Green

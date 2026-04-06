@@ -1,21 +1,21 @@
-# Herd-Tune: Node Auto-Registration for Herd Pro
+# Herd-Tune: Node Auto-Registration for Herd
 
 ## Overview
 
-Herd Pro needs a frictionless way for operators to add Ollama backend nodes to their fleet. The workflow:
+Herd needs a frictionless way for operators to add Ollama backend nodes to their fleet. The workflow:
 
-1. Operator opens the Herd Pro dashboard in a browser (from any machine, including the node itself)
-2. Clicks "Add Node" — dashboard offers a download of the appropriate `herd-tune` script (PowerShell for Windows, bash for Linux), pre-configured with this Herd Pro instance's registration endpoint
+1. Operator opens the Herd dashboard in a browser (from any machine, including the node itself)
+2. Clicks "Add Node" — dashboard offers a download of the appropriate `herd-tune` script (PowerShell for Windows, bash for Linux), pre-configured with this Herd instance's registration endpoint
 3. Operator runs the script on the Ollama node
-4. Script detects local GPU/VRAM/RAM, probes the local Ollama instance, applies recommended `OLLAMA_*` environment variables, and POSTs a registration payload to Herd Pro
+4. Script detects local GPU/VRAM/RAM, probes the local Ollama instance, applies recommended `OLLAMA_*` environment variables, and POSTs a registration payload to Herd
 5. Node appears in the dashboard fleet view immediately
 
-No SSH. No file uploads. No manual config editing. The script is the only thing that touches the node. Herd Pro only ever talks to nodes via their Ollama HTTP API.
+No SSH. No file uploads. No manual config editing. The script is the only thing that touches the node. Herd only ever talks to nodes via their Ollama HTTP API.
 
 ## Architecture
 
 ```
-[Herd Pro Dashboard]
+[Herd Dashboard]
   │
   ├── GET /dashboard/add-node          → "Add Node" page with download buttons
   ├── GET /api/nodes/script?os=windows → Returns herd-tune.ps1 with endpoint baked in
@@ -76,19 +76,19 @@ Called by `herd-tune` after local detection. Registers or updates a node.
 **Behavior:**
 - If a node with the same `hostname` already exists, update it (re-registration is idempotent)
 - Start health polling immediately on successful registration
-- Store in SQLite (consistent with Herd Pro's existing data layer)
+- Store in SQLite (consistent with Herd's existing data layer)
 
 ### GET /api/nodes/script?os={windows|linux}
 
-Returns the `herd-tune` script with the Herd Pro registration endpoint pre-configured.
+Returns the `herd-tune` script with the Herd registration endpoint pre-configured.
 
 **Behavior:**
 - Read the script template from an embedded resource or file
-- Replace the placeholder endpoint URL with the actual Herd Pro base URL (derived from the request's Host header or a configured public URL)
+- Replace the placeholder endpoint URL with the actual Herd base URL (derived from the request's Host header or a configured public URL)
 - Set `Content-Disposition: attachment; filename="herd-tune.ps1"` (or `.sh`)
 - Set appropriate `Content-Type`
 
-**Example:** If Herd Pro is running at `http://192.168.1.50:8081`, the downloaded script will have `$HerdProEndpoint = "http://192.168.1.50:8081"` baked in.
+**Example:** If Herd is running at `http://192.168.1.50:8081`, the downloaded script will have `$HerdEndpoint = "http://192.168.1.50:8081"` baked in.
 
 ### GET /api/nodes
 
@@ -129,7 +129,7 @@ Remove a node from the fleet. Stops health polling. In-flight requests to this n
 
 ## Health Polling
 
-After registration, Herd Pro polls each node on a configurable interval (default 10s):
+After registration, Herd polls each node on a configurable interval (default 10s):
 
 1. `GET {ollama_url}/api/ps` → loaded models, VRAM usage, context length, expiration
 2. `GET {ollama_url}/api/tags` → available models (less frequent, every 60s)
@@ -152,8 +152,8 @@ Core logic:
 - **Detect** GPU (nvidia-smi, WMI fallback), RAM, local Ollama via API
 - **Calculate** recommended `OLLAMA_*` settings based on VRAM
 - **Apply** (with `-Apply` flag) — set Machine-level env vars + restart Ollama service
-- **Register** — POST payload to `{HerdPro}/api/nodes/register`
-- **Fallback** — if `-HerdPro` not set and no baked endpoint, skip registration, do local detection only
+- **Register** — POST payload to `{Herd}/api/nodes/register`
+- **Fallback** — if `-Herd` not set and no baked endpoint, skip registration, do local detection only
 
 ### Bash (Linux) — herd-tune.sh
 
@@ -168,16 +168,16 @@ Same logic, adapted:
 Both scripts have a clearly marked placeholder at the top:
 
 ```powershell
-# ── Herd Pro Registration (auto-configured on download) ──
-$HerdProEndpoint = "%%HERD_PRO_ENDPOINT%%"
+# ── Herd Registration (auto-configured on download) ──
+$HerdEndpoint = "%%HERD_ENDPOINT%%"
 ```
 
 ```bash
-# ── Herd Pro Registration (auto-configured on download) ──
-HERD_PRO_ENDPOINT="%%HERD_PRO_ENDPOINT%%"
+# ── Herd Registration (auto-configured on download) ──
+HERD_ENDPOINT="%%HERD_ENDPOINT%%"
 ```
 
-The `/api/nodes/script` endpoint replaces `%%HERD_PRO_ENDPOINT%%` with the real URL before serving.
+The `/api/nodes/script` endpoint replaces `%%HERD_ENDPOINT%%` with the real URL before serving.
 
 ## Dashboard UI — Add Node Flow
 
@@ -222,7 +222,7 @@ The `/api/nodes/script` endpoint replaces `%%HERD_PRO_ENDPOINT%%` with the real 
 
 ## Data Storage
 
-Add a `nodes` table to Herd Pro's SQLite database:
+Add a `nodes` table to Herd's SQLite database:
 
 ```sql
 CREATE TABLE IF NOT EXISTS nodes (
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 ## Integration with Routing
 
-The node registry replaces the current static backend configuration. Herd Pro's router should:
+The node registry replaces the current static backend configuration. Herd's router should:
 
 1. Query the `nodes` table for `enabled = 1 AND status IN ('healthy', 'degraded')`
 2. Use `max_concurrent` to know how many parallel slots each node has
@@ -262,7 +262,7 @@ This means the `[[backends]]` section in the TOML/YAML config becomes optional �
 
 ## Implementation Order
 
-1. **SQLite `nodes` table** — migration in Herd Pro
+1. **SQLite `nodes` table** — migration in Herd
 2. **POST /api/nodes/register** — accept and store registrations
 3. **GET /api/nodes** — list nodes (dashboard needs this)
 4. **Health poller** — background task polling registered nodes
@@ -275,8 +275,8 @@ This means the `[[backends]]` section in the TOML/YAML config becomes optional �
 
 ## Notes
 
-- Scripts ship embedded in the Herd Pro binary/container, not as separate downloads. When the container is built, the scripts are bundled.
+- Scripts ship embedded in the Herd binary/container, not as separate downloads. When the container is built, the scripts are bundled.
 - Registration is idempotent. Running `herd-tune` again on a node updates its entry. This is how you "re-tune" after hardware changes.
 - The dashboard "Add Node" instructions should be visible even with zero nodes registered (first-run experience).
-- Herd Pro's public URL / external address may differ from its container internal address. Consider a `HERD_PRO_PUBLIC_URL` env var for generating correct script endpoints.
-- The scripts should detect the Ollama URL on the local machine and prefer Tailscale IP > LAN IP > localhost for the `ollama_url` field, since Herd Pro needs to reach it from the container network.
+- Herd's public URL / external address may differ from its container internal address. Consider a `HERD_PUBLIC_URL` env var for generating correct script endpoints.
+- The scripts should detect the Ollama URL on the local machine and prefer Tailscale IP > LAN IP > localhost for the `ollama_url` field, since Herd needs to reach it from the container network.
