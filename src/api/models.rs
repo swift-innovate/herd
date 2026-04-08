@@ -549,6 +549,97 @@ pub async fn delete_node_model(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/ollama/models — list all locally available Ollama model blobs
+// ---------------------------------------------------------------------------
+
+pub async fn list_ollama_blobs() -> Result<
+    Json<Vec<crate::blob::ExtractedModel>>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    match crate::blob::list_ollama_models() {
+        Ok(models) => Ok(Json(models)),
+        Err(e) => {
+            tracing::warn!("Failed to list Ollama blobs: {}", e);
+            // Graceful: return empty list rather than error for missing dir
+            Ok(Json(vec![]))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/ollama/extract — extract a model's GGUF blob to a target path
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct ExtractRequest {
+    pub model: String,
+    #[serde(default = "default_tag")]
+    pub tag: String,
+    pub target_path: String,
+}
+
+fn default_tag() -> String {
+    "latest".to_string()
+}
+
+#[derive(Serialize)]
+pub struct ExtractResponse {
+    pub model: String,
+    pub tag: String,
+    pub blob_path: String,
+    pub target_path: String,
+    pub size_bytes: u64,
+    pub digest: String,
+}
+
+pub async fn extract_ollama_blob(
+    Json(req): Json<ExtractRequest>,
+) -> Result<Json<ExtractResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Block path traversal
+    if req.target_path.contains("..") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "target_path must not contain '..'"})),
+        ));
+    }
+
+    let model = req.model.clone();
+    let tag = req.tag.clone();
+    let target_path = req.target_path.clone();
+    let target = std::path::PathBuf::from(&target_path);
+
+    let result = tokio::task::spawn_blocking(move || {
+        crate::blob::extract_to(&model, &tag, &target)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Task join error: {}", e)})),
+        )
+    })?
+    .map_err(|e| {
+        let msg = e.to_string();
+        let status = if msg.contains("Cannot read manifest") || msg.contains("Blob file not found")
+        {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, Json(serde_json::json!({"error": msg})))
+    })?;
+
+    Ok(Json(ExtractResponse {
+        model: result.model,
+        tag: result.tag,
+        blob_path: result.blob_path.to_string_lossy().to_string(),
+        target_path,
+        size_bytes: result.size_bytes,
+        digest: result.digest,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
