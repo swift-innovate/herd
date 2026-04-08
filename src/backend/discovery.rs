@@ -139,7 +139,7 @@ impl ModelDiscovery {
 
     async fn discover_models(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
         let mut model_names: Vec<String> = match backend.backend {
-            crate::config::BackendType::LlamaServer => {
+            crate::config::BackendType::LlamaServer | crate::config::BackendType::OpenAICompat => {
                 let url = format!("{}/v1/models", backend.url);
                 let resp = self.client.get(&url).send().await?;
                 let models: OpenAIModelsResponse = resp.json().await?;
@@ -187,8 +187,8 @@ impl ModelDiscovery {
 
     async fn discover_running(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
         let current = match backend.backend {
-            crate::config::BackendType::LlamaServer => {
-                // llama-server always has its model loaded — use /v1/models
+            crate::config::BackendType::LlamaServer | crate::config::BackendType::OpenAICompat => {
+                // llama-server/OpenAI-compat always has its model loaded — use /v1/models
                 let url = format!("{}/v1/models", backend.url);
                 let resp = self.client.get(&url).send().await?;
                 let models: OpenAIModelsResponse = resp.json().await?;

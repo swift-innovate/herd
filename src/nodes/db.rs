@@ -1,7 +1,23 @@
 use super::types::*;
 use anyhow::Result;
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+
+/// Tracks a model file download in progress or completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelDownload {
+    pub id: String,
+    pub node_id: String,
+    pub url: String,
+    pub file_name: String,
+    pub target_path: String,
+    pub bytes_downloaded: u64,
+    pub total_bytes: u64,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
 
 pub struct NodeDb {
     conn: Mutex<Connection>,
@@ -56,7 +72,7 @@ impl NodeDb {
         // Migration v1: add stable machine identity column
         conn.execute_batch("ALTER TABLE nodes ADD COLUMN node_id TEXT;")
             .ok(); // silently ignores "duplicate column" on subsequent runs
-        // Create unique index separately (idempotent)
+                   // Create unique index separately (idempotent)
         conn.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_node_id ON nodes(node_id) WHERE node_id IS NOT NULL;",
         )?;
@@ -86,22 +102,46 @@ impl NodeDb {
             "UPDATE nodes SET backend_url = ollama_url WHERE backend_url = '' AND ollama_url != '';",
         )?;
 
+        // Migration v3: additional GPU metadata
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN gpu_driver_version TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN max_context_len INTEGER DEFAULT 4096;")
+            .ok();
+
+        // Migration v4: model download tracking
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS model_downloads (
+                id TEXT PRIMARY KEY,
+                node_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                target_path TEXT NOT NULL,
+                bytes_downloaded INTEGER DEFAULT 0,
+                total_bytes INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (node_id) REFERENCES nodes(id)
+            );",
+        )?;
+
         Ok(())
     }
 
-    /// Map a SELECT row (29 columns) to a Node struct.
+    /// Map a SELECT row (31 columns) to a Node struct.
     /// Column order matches NODE_COLUMNS:
     ///   id, node_id, hostname, backend_url, backend, backend_version,
     ///   gpu, gpu_vendor, gpu_model, gpu_backend, cuda_version,
     ///   vram_mb, ram_mb, max_concurrent,
     ///   ollama_version, os, status, priority, enabled, tags, models_available,
-    ///   models_loaded, model_paths, capabilities,
+    ///   models_loaded, model_paths, capabilities, gpu_driver_version, max_context_len,
     ///   recommended_config, config_applied, last_health_check,
     ///   registered_at, updated_at
     fn row_to_node(row: &rusqlite::Row) -> rusqlite::Result<Node> {
         let backend_str: String = row.get(4)?;
         let backend = match backend_str.as_str() {
             "llama-server" => crate::config::BackendType::LlamaServer,
+            "openai-compat" => crate::config::BackendType::OpenAICompat,
             _ => crate::config::BackendType::Ollama,
         };
         Ok(Node {
@@ -129,12 +169,14 @@ impl NodeDb {
             models_loaded: serde_json::from_str(&row.get::<_, String>(21)?).unwrap_or_default(),
             model_paths: serde_json::from_str(&row.get::<_, String>(22)?).unwrap_or_default(),
             capabilities: serde_json::from_str(&row.get::<_, String>(23)?).unwrap_or_default(),
-            recommended_config: serde_json::from_str(&row.get::<_, String>(24)?)
+            gpu_driver_version: row.get(24)?,
+            max_context_len: row.get::<_, i32>(25)? as u32,
+            recommended_config: serde_json::from_str(&row.get::<_, String>(26)?)
                 .unwrap_or_default(),
-            config_applied: row.get::<_, i32>(25)? != 0,
-            last_health_check: row.get(26)?,
-            registered_at: row.get(27)?,
-            updated_at: row.get(28)?,
+            config_applied: row.get::<_, i32>(27)? != 0,
+            last_health_check: row.get(28)?,
+            registered_at: row.get(29)?,
+            updated_at: row.get(30)?,
         })
     }
 
@@ -143,7 +185,7 @@ impl NodeDb {
          gpu, gpu_vendor, gpu_model, gpu_backend, cuda_version,
          vram_mb, ram_mb, max_concurrent,
          ollama_version, os, status, priority, enabled, tags, models_available,
-         models_loaded, model_paths, capabilities,
+         models_loaded, model_paths, capabilities, gpu_driver_version, max_context_len,
          recommended_config, config_applied, last_health_check,
          registered_at, updated_at";
 
@@ -204,7 +246,8 @@ impl NodeDb {
                     node_id = COALESCE(?14, node_id), hostname = ?15,
                     backend = ?16, backend_url = ?17, backend_version = ?18,
                     gpu_vendor = ?19, gpu_model = ?20, gpu_backend = ?21,
-                    cuda_version = ?22, model_paths = ?23, capabilities = ?24
+                    cuda_version = ?22, model_paths = ?23, capabilities = ?24,
+                    gpu_driver_version = ?25, max_context_len = ?26
                 WHERE id = ?13",
                 rusqlite::params![
                     backend_url,
@@ -230,7 +273,9 @@ impl NodeDb {
                     reg.gpu_backend,
                     reg.cuda_version,
                     model_paths_json,
-                    capabilities_json
+                    capabilities_json,
+                    reg.gpu_driver_version,
+                    reg.max_context_len
                 ],
             )?;
             Ok((id, false))
@@ -244,9 +289,10 @@ impl NodeDb {
                     registered_at, updated_at,
                     backend, backend_url, backend_version,
                     gpu_vendor, gpu_model, gpu_backend, cuda_version,
-                    model_paths, capabilities)
+                    model_paths, capabilities,
+                    gpu_driver_version, max_context_len)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'healthy', ?11, ?12, ?13, ?14, ?15, ?16,
-                        ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                        ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
                 rusqlite::params![
                     id,
                     reg.node_id,
@@ -272,7 +318,9 @@ impl NodeDb {
                     reg.gpu_backend,
                     reg.cuda_version,
                     model_paths_json,
-                    capabilities_json
+                    capabilities_json,
+                    reg.gpu_driver_version,
+                    reg.max_context_len
                 ],
             )?;
             Ok((id, true))
@@ -302,10 +350,7 @@ impl NodeDb {
             .conn
             .lock()
             .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
-        let sql = format!(
-            "SELECT {} FROM nodes WHERE id = ?1",
-            Self::NODE_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM nodes WHERE id = ?1", Self::NODE_COLUMNS);
         let result = conn.query_row(&sql, rusqlite::params![id], Self::row_to_node);
         match result {
             Ok(node) => Ok(Some(node)),
@@ -402,10 +447,7 @@ impl NodeDb {
             .conn
             .lock()
             .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
-        let sql = format!(
-            "SELECT {} FROM nodes WHERE enabled = 1",
-            Self::NODE_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM nodes WHERE enabled = 1", Self::NODE_COLUMNS);
         let mut stmt = conn.prepare(&sql)?;
         let nodes = stmt
             .query_map([], Self::row_to_node)?
@@ -428,6 +470,127 @@ impl NodeDb {
             .query_map([], Self::row_to_node)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(nodes)
+    }
+
+    // ── Model download tracking ──────────────────────────────────────
+
+    /// Create a new download tracking entry. Returns the download ID.
+    pub fn create_download(
+        &self,
+        node_id: &str,
+        url: &str,
+        file_name: &str,
+        target_path: &str,
+        total_bytes: u64,
+    ) -> Result<String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO model_downloads (id, node_id, url, file_name, target_path, total_bytes, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)",
+            rusqlite::params![id, node_id, url, file_name, target_path, total_bytes as i64, now],
+        )?;
+        Ok(id)
+    }
+
+    /// Update download progress (bytes_downloaded and optionally status).
+    pub fn update_download_progress(
+        &self,
+        id: &str,
+        bytes_downloaded: u64,
+        status: &str,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows = conn.execute(
+            "UPDATE model_downloads SET bytes_downloaded = ?1, status = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![bytes_downloaded as i64, status, now, id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Get a single download by ID.
+    pub fn get_download(&self, id: &str) -> Result<Option<ModelDownload>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let result = conn.query_row(
+            "SELECT id, node_id, url, file_name, target_path, bytes_downloaded, total_bytes, status, created_at, updated_at
+             FROM model_downloads WHERE id = ?1",
+            rusqlite::params![id],
+            Self::row_to_download,
+        );
+        match result {
+            Ok(dl) => Ok(Some(dl)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// List all downloads, optionally filtered by node_id.
+    pub fn list_downloads(&self, node_id: Option<&str>) -> Result<Vec<ModelDownload>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(nid) =
+            node_id
+        {
+            (
+                "SELECT id, node_id, url, file_name, target_path, bytes_downloaded, total_bytes, status, created_at, updated_at
+                 FROM model_downloads WHERE node_id = ?1 ORDER BY created_at DESC".to_string(),
+                vec![Box::new(nid.to_string())],
+            )
+        } else {
+            (
+                "SELECT id, node_id, url, file_name, target_path, bytes_downloaded, total_bytes, status, created_at, updated_at
+                 FROM model_downloads ORDER BY created_at DESC".to_string(),
+                vec![],
+            )
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let downloads = stmt
+            .query_map(params_ref.as_slice(), Self::row_to_download)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(downloads)
+    }
+
+    /// Delete a download record.
+    pub fn delete_download(&self, id: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let rows = conn.execute(
+            "DELETE FROM model_downloads WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    fn row_to_download(row: &rusqlite::Row) -> rusqlite::Result<ModelDownload> {
+        Ok(ModelDownload {
+            id: row.get(0)?,
+            node_id: row.get(1)?,
+            url: row.get(2)?,
+            file_name: row.get(3)?,
+            target_path: row.get(4)?,
+            bytes_downloaded: row.get::<_, i64>(5)? as u64,
+            total_bytes: row.get::<_, i64>(6)? as u64,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
     }
 }
 
@@ -558,5 +721,178 @@ mod tests {
         assert_eq!(node.priority, 200);
         assert_eq!(node.backend, BackendType::LlamaServer);
         assert_eq!(node.gpu_vendor.as_deref(), Some("nvidia"));
+    }
+
+    #[test]
+    fn migrate_v3_adds_gpu_driver_and_context_columns() {
+        let db = test_db();
+        // Verify columns exist by inserting a node with the new fields
+        let reg = NodeRegistration {
+            hostname: "v3-test".to_string(),
+            ollama_url: "http://test:11434".to_string(),
+            gpu_driver_version: Some("572.83".to_string()),
+            max_context_len: 8192,
+            ..Default::default()
+        };
+        let (id, _) = db.upsert_node(&reg).unwrap();
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert_eq!(node.gpu_driver_version.as_deref(), Some("572.83"));
+        assert_eq!(node.max_context_len, 8192);
+    }
+
+    #[test]
+    fn upsert_with_gpu_driver_and_context_len() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "gpu-node".to_string(),
+            backend_url: Some("http://gpu:8090".to_string()),
+            backend: BackendType::LlamaServer,
+            gpu_driver_version: Some("572.83".to_string()),
+            max_context_len: 131072,
+            ..Default::default()
+        };
+        let (id, is_new) = db.upsert_node(&reg).unwrap();
+        assert!(is_new);
+
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert_eq!(node.gpu_driver_version.as_deref(), Some("572.83"));
+        assert_eq!(node.max_context_len, 131072);
+
+        // Re-register with updated driver version
+        let reg2 = NodeRegistration {
+            hostname: "gpu-node".to_string(),
+            backend_url: Some("http://gpu:8090".to_string()),
+            backend: BackendType::LlamaServer,
+            gpu_driver_version: Some("575.01".to_string()),
+            max_context_len: 65536,
+            ..Default::default()
+        };
+        let (id2, is_new2) = db.upsert_node(&reg2).unwrap();
+        assert!(!is_new2);
+        assert_eq!(id, id2);
+
+        let node2 = db.get_node(&id2).unwrap().unwrap();
+        assert_eq!(node2.gpu_driver_version.as_deref(), Some("575.01"));
+        assert_eq!(node2.max_context_len, 65536);
+    }
+
+    #[test]
+    fn backward_compat_old_payload_defaults_new_fields() {
+        let db = test_db();
+        // Old-style registration without gpu_driver_version or max_context_len
+        let reg = NodeRegistration {
+            hostname: "old-node".to_string(),
+            ollama_url: "http://old:11434".to_string(),
+            ..Default::default()
+        };
+        let (id, _) = db.upsert_node(&reg).unwrap();
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert!(node.gpu_driver_version.is_none());
+        assert_eq!(node.max_context_len, 4096); // default
+    }
+
+    #[test]
+    fn model_registry_computation() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "registry-node".to_string(),
+            backend_url: Some("http://node:8090".to_string()),
+            backend: BackendType::LlamaServer,
+            model_paths: vec![
+                "/models/gemma-4-26B.gguf".to_string(),
+                "/models/qwen3-32b.gguf".to_string(),
+            ],
+            models_loaded: vec!["gemma-4-26B.gguf".to_string()],
+            ..Default::default()
+        };
+        let (id, _) = db.upsert_node(&reg).unwrap();
+        let node = db.get_node(&id).unwrap().unwrap();
+
+        let registry = node.model_registry();
+        assert_eq!(registry.len(), 2);
+
+        assert_eq!(registry[0].file_name, "gemma-4-26B.gguf");
+        assert_eq!(registry[0].file_path, "/models/gemma-4-26B.gguf");
+        assert!(registry[0].loaded);
+
+        assert_eq!(registry[1].file_name, "qwen3-32b.gguf");
+        assert_eq!(registry[1].file_path, "/models/qwen3-32b.gguf");
+        assert!(!registry[1].loaded);
+    }
+
+    #[test]
+    fn download_tracking_crud() {
+        let db = test_db();
+        // Create a node first (foreign key)
+        let reg = NodeRegistration {
+            hostname: "dl-node".to_string(),
+            ollama_url: "http://dl:11434".to_string(),
+            ..Default::default()
+        };
+        let (node_id, _) = db.upsert_node(&reg).unwrap();
+
+        // Create download
+        let dl_id = db
+            .create_download(
+                &node_id,
+                "https://huggingface.co/model/file.gguf",
+                "file.gguf",
+                "/models/file.gguf",
+                5_000_000_000,
+            )
+            .unwrap();
+
+        // Get download
+        let dl = db.get_download(&dl_id).unwrap().unwrap();
+        assert_eq!(dl.node_id, node_id);
+        assert_eq!(dl.file_name, "file.gguf");
+        assert_eq!(dl.status, "pending");
+        assert_eq!(dl.bytes_downloaded, 0);
+        assert_eq!(dl.total_bytes, 5_000_000_000);
+
+        // Update progress
+        db.update_download_progress(&dl_id, 1_000_000_000, "downloading")
+            .unwrap();
+        let dl2 = db.get_download(&dl_id).unwrap().unwrap();
+        assert_eq!(dl2.bytes_downloaded, 1_000_000_000);
+        assert_eq!(dl2.status, "downloading");
+
+        // Complete
+        db.update_download_progress(&dl_id, 5_000_000_000, "completed")
+            .unwrap();
+        let dl3 = db.get_download(&dl_id).unwrap().unwrap();
+        assert_eq!(dl3.status, "completed");
+        assert_eq!(dl3.bytes_downloaded, 5_000_000_000);
+
+        // List downloads
+        let all = db.list_downloads(None).unwrap();
+        assert_eq!(all.len(), 1);
+        let by_node = db.list_downloads(Some(&node_id)).unwrap();
+        assert_eq!(by_node.len(), 1);
+        let by_other = db.list_downloads(Some("nonexistent")).unwrap();
+        assert!(by_other.is_empty());
+
+        // Delete
+        assert!(db.delete_download(&dl_id).unwrap());
+        assert!(db.get_download(&dl_id).unwrap().is_none());
+        assert!(!db.delete_download(&dl_id).unwrap()); // already deleted
+    }
+
+    #[test]
+    fn node_columns_count_matches_row_to_node() {
+        // Verify NODE_COLUMNS has exactly 31 columns matching row_to_node expectations
+        let col_count = NodeDb::NODE_COLUMNS
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count();
+        assert_eq!(col_count, 31, "NODE_COLUMNS should have 31 columns");
+    }
+
+    #[test]
+    fn migrate_v4_creates_downloads_table() {
+        let db = test_db();
+        // Verify the table exists by listing downloads (should be empty, not error)
+        let downloads = db.list_downloads(None).unwrap();
+        assert!(downloads.is_empty());
     }
 }

@@ -130,8 +130,7 @@ impl NodeHealthPoller {
                 if let Some(mut state) = pool.get(&backend_name).await {
                     state.config = backend;
                     state.models = node.models_loaded.clone();
-                    state.healthy =
-                        node.status == "healthy" || node.status == "degraded";
+                    state.healthy = node.status == "healthy" || node.status == "degraded";
                     if node.vram_mb > 0 {
                         state.vram_total_mb = Some(node.vram_mb as u64);
                         state.vram_populated = true;
@@ -174,7 +173,7 @@ impl NodeHealthPoller {
         let base_url = node.backend_url.trim_end_matches('/');
 
         match node.backend {
-            crate::config::BackendType::LlamaServer => {
+            crate::config::BackendType::LlamaServer | crate::config::BackendType::OpenAICompat => {
                 self.poll_llama_server(node_db, node, base_url).await;
             }
             crate::config::BackendType::Ollama => {
@@ -222,11 +221,7 @@ impl NodeHealthPoller {
                 if let Err(e) =
                     node_db.update_health(&node.id, status, &models_loaded, models_available)
                 {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
             Ok(resp) => {
@@ -243,11 +238,7 @@ impl NodeHealthPoller {
                     "unreachable"
                 };
                 if let Err(e) = node_db.update_health(&node.id, new_status, &[], None) {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
             Err(e) => {
@@ -263,22 +254,13 @@ impl NodeHealthPoller {
                     _ => "unreachable",
                 };
                 if let Err(e) = node_db.update_health(&node.id, new_status, &[], None) {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
         }
     }
 
-    async fn poll_llama_server(
-        &self,
-        node_db: &NodeDb,
-        node: &crate::nodes::Node,
-        base_url: &str,
-    ) {
+    async fn poll_llama_server(&self, node_db: &NodeDb, node: &crate::nodes::Node, base_url: &str) {
         // GET /health — server health status
         let health_url = format!("{}/health", base_url);
         let health_result = self.client.get(&health_url).send().await;
@@ -320,11 +302,7 @@ impl NodeHealthPoller {
                 if let Err(e) =
                     node_db.update_health(&node.id, "healthy", &models_loaded, models_available)
                 {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
             Ok(resp) => {
@@ -340,11 +318,7 @@ impl NodeHealthPoller {
                     "unreachable"
                 };
                 if let Err(e) = node_db.update_health(&node.id, new_status, &[], None) {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
             Err(e) => {
@@ -360,11 +334,7 @@ impl NodeHealthPoller {
                     _ => "unreachable",
                 };
                 if let Err(e) = node_db.update_health(&node.id, new_status, &[], None) {
-                    tracing::error!(
-                        "Failed to update health for node {}: {}",
-                        node.hostname,
-                        e
-                    );
+                    tracing::error!("Failed to update health for node {}: {}", node.hostname, e);
                 }
             }
         }

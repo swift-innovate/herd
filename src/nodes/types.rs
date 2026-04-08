@@ -1,5 +1,6 @@
 use crate::config::BackendType;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Registration payload from herd-tune scripts
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +66,14 @@ pub struct NodeRegistration {
     #[serde(default)]
     pub capabilities: Vec<String>,
 
+    /// GPU driver version string (e.g., "572.83")
+    #[serde(default)]
+    pub gpu_driver_version: Option<String>,
+
+    /// Max context length the backend supports
+    #[serde(default = "default_max_context_len")]
+    pub max_context_len: u32,
+
     #[serde(default)]
     pub recommended_config: serde_json::Value,
     #[serde(default)]
@@ -75,6 +84,10 @@ pub struct NodeRegistration {
     pub os: Option<String>,
     #[serde(default)]
     pub registered_at: Option<String>,
+}
+
+fn default_max_context_len() -> u32 {
+    4096
 }
 
 impl NodeRegistration {
@@ -105,6 +118,8 @@ impl Default for NodeRegistration {
             models_loaded: Vec::new(),
             model_paths: Vec::new(),
             capabilities: Vec::new(),
+            gpu_driver_version: None,
+            max_context_len: 4096,
             recommended_config: serde_json::Value::Object(Default::default()),
             config_applied: false,
             herd_tune_version: None,
@@ -142,11 +157,46 @@ pub struct Node {
     pub models_loaded: Vec<String>,
     pub model_paths: Vec<String>,
     pub capabilities: Vec<String>,
+    pub gpu_driver_version: Option<String>,
+    pub max_context_len: u32,
     pub recommended_config: serde_json::Value,
     pub config_applied: bool,
     pub last_health_check: Option<String>,
     pub registered_at: String,
     pub updated_at: String,
+}
+
+/// Entry in a node's model registry, derived from model_paths and models_loaded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRegistryEntry {
+    pub file_name: String,
+    pub file_path: String,
+    pub file_size_bytes: Option<u64>,
+    pub loaded: bool,
+}
+
+impl Node {
+    /// For llama-server nodes, compute model registry from model_paths + models_loaded.
+    pub fn model_registry(&self) -> Vec<ModelRegistryEntry> {
+        self.model_paths
+            .iter()
+            .map(|path| {
+                let file_name = Path::new(path)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+                let loaded = self.models_loaded.iter().any(|m| {
+                    m == &file_name || m == path || file_name.contains(m) || m.contains(&file_name)
+                });
+                ModelRegistryEntry {
+                    file_name,
+                    file_path: path.clone(),
+                    file_size_bytes: None,
+                    loaded,
+                }
+            })
+            .collect()
+    }
 }
 
 /// Update payload for PUT /api/nodes/:id

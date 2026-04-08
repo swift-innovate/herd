@@ -39,7 +39,7 @@ impl ModelWarmer {
             if let Some(state) = pool.get(&name).await {
                 // Skip llama-server backends — models are loaded at server start,
                 // and /api/generate is Ollama-specific.
-                if state.config.backend == crate::config::BackendType::LlamaServer {
+                if state.config.backend != crate::config::BackendType::Ollama {
                     continue;
                 }
                 for model in &state.config.hot_models {

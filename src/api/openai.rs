@@ -178,6 +178,12 @@ pub async fn chat_completions(
                 request_id: Some(request_id.clone()),
                 tier: None,
                 classified_by: None,
+                tokens_in: None,
+                tokens_out: None,
+                tokens_per_second: None,
+                prompt_eval_ms: None,
+                eval_ms: None,
+                backend_type: None,
             };
             state
                 .metrics
@@ -209,6 +215,12 @@ pub async fn chat_completions(
         request_id: Some(request_id.clone()),
         tier: None,
         classified_by: None,
+        tokens_in: None,
+        tokens_out: None,
+        tokens_per_second: None,
+        prompt_eval_ms: None,
+        eval_ms: None,
+        backend_type: None,
     };
     state
         .metrics

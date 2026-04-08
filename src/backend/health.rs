@@ -40,7 +40,10 @@ impl HealthChecker {
                     );
                     continue;
                 }
-                let path = state.config.health_check_path.as_deref()
+                let path = state
+                    .config
+                    .health_check_path
+                    .as_deref()
                     .unwrap_or(state.config.default_health_check_path());
                 let url = format!("{}{}", state.config.url.trim_end_matches('/'), path);
                 match self.client.get(&url).send().await {
@@ -107,7 +110,9 @@ mod tests {
             priority: 50,
             ..Default::default()
         };
-        let path = b.health_check_path.as_deref()
+        let path = b
+            .health_check_path
+            .as_deref()
             .unwrap_or(b.default_health_check_path());
         assert_eq!(path, "/health");
     }
@@ -115,7 +120,9 @@ mod tests {
     #[test]
     fn ollama_default_health_check_path() {
         let b = Backend::default();
-        let path = b.health_check_path.as_deref()
+        let path = b
+            .health_check_path
+            .as_deref()
             .unwrap_or(b.default_health_check_path());
         assert_eq!(path, "/");
     }
@@ -130,7 +137,9 @@ mod tests {
             priority: 50,
             ..Default::default()
         };
-        let path = b.health_check_path.as_deref()
+        let path = b
+            .health_check_path
+            .as_deref()
             .unwrap_or(b.default_health_check_path());
         assert_eq!(path, "/v1/models");
     }
