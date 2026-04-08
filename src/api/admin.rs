@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 pub struct AddBackendRequest {
     pub name: String,
     pub url: String,
+    #[serde(default)]
+    pub backend: BackendType,
     #[serde(default = "default_priority")]
     pub priority: u32,
     #[serde(default)]
@@ -42,6 +44,7 @@ pub struct UpdateBackendRequest {
 pub struct BackendResponse {
     pub name: String,
     pub url: String,
+    pub backend: String,
     pub priority: u32,
     pub hot_models: Vec<String>,
     pub model_filter: Option<String>,
@@ -66,6 +69,7 @@ fn backend_to_response(b: &crate::backend::BackendState) -> BackendResponse {
     BackendResponse {
         name: b.config.name.clone(),
         url: b.config.url.clone(),
+        backend: b.config.backend.to_string(),
         priority: b.config.priority,
         hot_models: b.config.hot_models.clone(),
         model_filter: b.config.model_filter.clone(),
@@ -120,7 +124,7 @@ pub async fn add_backend(
     let backend = Backend {
         name: req.name.clone(),
         url: req.url,
-        backend: BackendType::default(),
+        backend: req.backend,
         priority: req.priority,
         hot_models: Vec::new(),
         gpu_hot_url: None,
