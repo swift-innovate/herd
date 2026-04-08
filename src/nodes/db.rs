@@ -53,63 +53,98 @@ impl NodeDb {
                 updated_at TEXT NOT NULL
             );",
         )?;
-        // Migration: add stable machine identity column
+        // Migration v1: add stable machine identity column
         conn.execute_batch("ALTER TABLE nodes ADD COLUMN node_id TEXT;")
             .ok(); // silently ignores "duplicate column" on subsequent runs
         // Create unique index separately (idempotent)
         conn.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_node_id ON nodes(node_id) WHERE node_id IS NOT NULL;",
         )?;
+
+        // Migration v2: llama-server backend support
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN backend TEXT NOT NULL DEFAULT 'ollama';")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN backend_url TEXT NOT NULL DEFAULT '';")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN backend_version TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN gpu_vendor TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN gpu_model TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN gpu_backend TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN cuda_version TEXT;")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN model_paths TEXT DEFAULT '[]';")
+            .ok();
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN capabilities TEXT DEFAULT '[]';")
+            .ok();
+
+        // Backfill: copy ollama_url -> backend_url for existing rows where backend_url is empty
+        conn.execute_batch(
+            "UPDATE nodes SET backend_url = ollama_url WHERE backend_url = '' AND ollama_url != '';",
+        )?;
+
         Ok(())
     }
 
-    /// Map a SELECT row (21 columns, node_id at index 1) to a Node struct.
-    /// Column order: id, node_id, hostname, ollama_url (→ backend_url), gpu, vram_mb, ram_mb,
-    ///   max_concurrent, ollama_version, os, status, priority, enabled, tags,
-    ///   models_available, models_loaded, recommended_config, config_applied,
-    ///   last_health_check, registered_at, updated_at
-    /// NOTE: Full schema migration happens in Task 3. This is a minimal bridge
-    /// that reads the old column into backend_url and defaults new fields.
+    /// Map a SELECT row (29 columns) to a Node struct.
+    /// Column order matches NODE_COLUMNS:
+    ///   id, node_id, hostname, backend_url, backend, backend_version,
+    ///   gpu, gpu_vendor, gpu_model, gpu_backend, cuda_version,
+    ///   vram_mb, ram_mb, max_concurrent,
+    ///   ollama_version, os, status, priority, enabled, tags, models_available,
+    ///   models_loaded, model_paths, capabilities,
+    ///   recommended_config, config_applied, last_health_check,
+    ///   registered_at, updated_at
     fn row_to_node(row: &rusqlite::Row) -> rusqlite::Result<Node> {
+        let backend_str: String = row.get(4)?;
+        let backend = match backend_str.as_str() {
+            "llama-server" => crate::config::BackendType::LlamaServer,
+            _ => crate::config::BackendType::Ollama,
+        };
         Ok(Node {
             id: row.get(0)?,
             node_id: row.get(1)?,
             hostname: row.get(2)?,
             backend_url: row.get(3)?,
-            backend: crate::config::BackendType::default(),
-            backend_version: None,
-            gpu: row.get(4)?,
-            gpu_vendor: None,
-            gpu_model: None,
-            gpu_backend: None,
-            cuda_version: None,
-            vram_mb: row.get::<_, i32>(5)? as u32,
-            ram_mb: row.get::<_, i32>(6)? as u32,
-            max_concurrent: row.get::<_, i32>(7)? as u32,
-            ollama_version: row.get(8)?,
-            os: row.get(9)?,
-            status: row.get(10)?,
-            priority: row.get::<_, i32>(11)? as u32,
-            enabled: row.get::<_, i32>(12)? != 0,
-            tags: serde_json::from_str(&row.get::<_, String>(13)?).unwrap_or_default(),
-            models_available: row.get::<_, i32>(14)? as u32,
-            models_loaded: serde_json::from_str(&row.get::<_, String>(15)?)
+            backend,
+            backend_version: row.get(5)?,
+            gpu: row.get(6)?,
+            gpu_vendor: row.get(7)?,
+            gpu_model: row.get(8)?,
+            gpu_backend: row.get(9)?,
+            cuda_version: row.get(10)?,
+            vram_mb: row.get::<_, i32>(11)? as u32,
+            ram_mb: row.get::<_, i32>(12)? as u32,
+            max_concurrent: row.get::<_, i32>(13)? as u32,
+            ollama_version: row.get(14)?,
+            os: row.get(15)?,
+            status: row.get(16)?,
+            priority: row.get::<_, i32>(17)? as u32,
+            enabled: row.get::<_, i32>(18)? != 0,
+            tags: serde_json::from_str(&row.get::<_, String>(19)?).unwrap_or_default(),
+            models_available: row.get::<_, i32>(20)? as u32,
+            models_loaded: serde_json::from_str(&row.get::<_, String>(21)?).unwrap_or_default(),
+            model_paths: serde_json::from_str(&row.get::<_, String>(22)?).unwrap_or_default(),
+            capabilities: serde_json::from_str(&row.get::<_, String>(23)?).unwrap_or_default(),
+            recommended_config: serde_json::from_str(&row.get::<_, String>(24)?)
                 .unwrap_or_default(),
-            model_paths: Vec::new(),
-            capabilities: Vec::new(),
-            recommended_config: serde_json::from_str(&row.get::<_, String>(16)?)
-                .unwrap_or_default(),
-            config_applied: row.get::<_, i32>(17)? != 0,
-            last_health_check: row.get(18)?,
-            registered_at: row.get(19)?,
-            updated_at: row.get(20)?,
+            config_applied: row.get::<_, i32>(25)? != 0,
+            last_health_check: row.get(26)?,
+            registered_at: row.get(27)?,
+            updated_at: row.get(28)?,
         })
     }
 
     const NODE_COLUMNS: &'static str =
-        "id, node_id, hostname, ollama_url, gpu, vram_mb, ram_mb, max_concurrent,
+        "id, node_id, hostname, backend_url, backend, backend_version,
+         gpu, gpu_vendor, gpu_model, gpu_backend, cuda_version,
+         vram_mb, ram_mb, max_concurrent,
          ollama_version, os, status, priority, enabled, tags, models_available,
-         models_loaded, recommended_config, config_applied, last_health_check,
+         models_loaded, model_paths, capabilities,
+         recommended_config, config_applied, last_health_check,
          registered_at, updated_at";
 
     /// Insert or update a node by hostname (idempotent registration).
@@ -145,7 +180,11 @@ impl NodeDb {
             });
 
         let models_loaded_json = serde_json::to_string(&reg.models_loaded)?;
+        let model_paths_json = serde_json::to_string(&reg.model_paths)?;
+        let capabilities_json = serde_json::to_string(&reg.capabilities)?;
         let recommended_config_json = serde_json::to_string(&reg.recommended_config)?;
+        let backend_str = reg.backend.to_string();
+        let backend_url = reg.effective_url().to_string();
 
         // Derive max_concurrent from recommended_config.num_parallel or default to 1
         let max_concurrent = reg
@@ -162,10 +201,13 @@ impl NodeDb {
                     max_concurrent = ?5, ollama_version = ?6, os = ?7,
                     status = 'healthy', models_available = ?8, models_loaded = ?9,
                     recommended_config = ?10, config_applied = ?11, updated_at = ?12,
-                    node_id = COALESCE(?14, node_id), hostname = ?15
+                    node_id = COALESCE(?14, node_id), hostname = ?15,
+                    backend = ?16, backend_url = ?17, backend_version = ?18,
+                    gpu_vendor = ?19, gpu_model = ?20, gpu_backend = ?21,
+                    cuda_version = ?22, model_paths = ?23, capabilities = ?24
                 WHERE id = ?13",
                 rusqlite::params![
-                    reg.effective_url().to_string(),
+                    backend_url,
                     reg.gpu,
                     reg.vram_mb,
                     reg.ram_mb,
@@ -179,7 +221,16 @@ impl NodeDb {
                     now,
                     id,
                     reg.node_id,
-                    reg.hostname
+                    reg.hostname,
+                    backend_str,
+                    backend_url,
+                    reg.backend_version,
+                    reg.gpu_vendor,
+                    reg.gpu_model,
+                    reg.gpu_backend,
+                    reg.cuda_version,
+                    model_paths_json,
+                    capabilities_json
                 ],
             )?;
             Ok((id, false))
@@ -190,13 +241,17 @@ impl NodeDb {
                 "INSERT INTO nodes (id, node_id, hostname, ollama_url, gpu, vram_mb, ram_mb,
                     max_concurrent, ollama_version, os, status, models_available,
                     models_loaded, recommended_config, config_applied,
-                    registered_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'healthy', ?11, ?12, ?13, ?14, ?15, ?16)",
+                    registered_at, updated_at,
+                    backend, backend_url, backend_version,
+                    gpu_vendor, gpu_model, gpu_backend, cuda_version,
+                    model_paths, capabilities)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'healthy', ?11, ?12, ?13, ?14, ?15, ?16,
+                        ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
                 rusqlite::params![
                     id,
                     reg.node_id,
                     reg.hostname,
-                    reg.effective_url().to_string(),
+                    backend_url,
                     reg.gpu,
                     reg.vram_mb,
                     reg.ram_mb,
@@ -208,7 +263,16 @@ impl NodeDb {
                     recommended_config_json,
                     reg.config_applied as i32,
                     registered_at,
-                    now
+                    now,
+                    backend_str,
+                    backend_url,
+                    reg.backend_version,
+                    reg.gpu_vendor,
+                    reg.gpu_model,
+                    reg.gpu_backend,
+                    reg.cuda_version,
+                    model_paths_json,
+                    capabilities_json
                 ],
             )?;
             Ok((id, true))
@@ -364,5 +428,135 @@ impl NodeDb {
             .query_map([], Self::row_to_node)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(nodes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BackendType;
+
+    fn test_db() -> NodeDb {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        let db = NodeDb {
+            conn: Mutex::new(conn),
+        };
+        db.migrate().unwrap();
+        db
+    }
+
+    #[test]
+    fn migrate_creates_table_and_columns() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "test-node".to_string(),
+            ollama_url: "http://test:11434".to_string(),
+            backend: BackendType::Ollama,
+            ..Default::default()
+        };
+        let (id, is_new) = db.upsert_node(&reg).unwrap();
+        assert!(is_new);
+
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert_eq!(node.backend, BackendType::Ollama);
+        assert_eq!(node.backend_url, "http://test:11434");
+    }
+
+    #[test]
+    fn upsert_llama_server_node() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "citadel".to_string(),
+            ollama_url: String::new(),
+            backend_url: Some("http://citadel:8090".to_string()),
+            backend: BackendType::LlamaServer,
+            backend_version: Some("b8678".to_string()),
+            gpu_vendor: Some("nvidia".to_string()),
+            gpu_model: Some("RTX 5090".to_string()),
+            gpu_backend: Some("cuda".to_string()),
+            cuda_version: Some("13.1".to_string()),
+            vram_mb: 32768,
+            models_loaded: vec!["gemma-4.gguf".to_string()],
+            model_paths: vec!["/models/gemma-4.gguf".to_string()],
+            capabilities: vec!["cuda".to_string(), "flash_attn".to_string()],
+            ..Default::default()
+        };
+        let (id, is_new) = db.upsert_node(&reg).unwrap();
+        assert!(is_new);
+
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert_eq!(node.backend, BackendType::LlamaServer);
+        assert_eq!(node.backend_url, "http://citadel:8090");
+        assert_eq!(node.backend_version.as_deref(), Some("b8678"));
+        assert_eq!(node.gpu_vendor.as_deref(), Some("nvidia"));
+        assert_eq!(node.gpu_model.as_deref(), Some("RTX 5090"));
+        assert_eq!(node.gpu_backend.as_deref(), Some("cuda"));
+        assert_eq!(node.cuda_version.as_deref(), Some("13.1"));
+        assert_eq!(node.vram_mb, 32768);
+        assert_eq!(node.capabilities, vec!["cuda", "flash_attn"]);
+        assert_eq!(node.model_paths, vec!["/models/gemma-4.gguf"]);
+    }
+
+    #[test]
+    fn upsert_idempotent_re_registration() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "node1".to_string(),
+            ollama_url: "http://node1:11434".to_string(),
+            backend: BackendType::Ollama,
+            ..Default::default()
+        };
+        let (id1, new1) = db.upsert_node(&reg).unwrap();
+        assert!(new1);
+
+        let (id2, new2) = db.upsert_node(&reg).unwrap();
+        assert!(!new2);
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn routable_nodes_filters_correctly() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "healthy-node".to_string(),
+            ollama_url: "http://healthy:11434".to_string(),
+            ..Default::default()
+        };
+        db.upsert_node(&reg).unwrap();
+
+        let routable = db.get_routable_nodes().unwrap();
+        assert_eq!(routable.len(), 1);
+        assert_eq!(routable[0].hostname, "healthy-node");
+    }
+
+    #[test]
+    fn update_preserves_backend_fields() {
+        let db = test_db();
+        let reg = NodeRegistration {
+            hostname: "citadel".to_string(),
+            backend_url: Some("http://citadel:8090".to_string()),
+            backend: BackendType::LlamaServer,
+            gpu_vendor: Some("nvidia".to_string()),
+            ..Default::default()
+        };
+        let (id, _) = db.upsert_node(&reg).unwrap();
+
+        // Update priority -- backend fields should be preserved
+        db.update_node(
+            &id,
+            &NodeUpdate {
+                priority: Some(200),
+                tags: None,
+                enabled: None,
+            },
+        )
+        .unwrap();
+
+        let node = db.get_node(&id).unwrap().unwrap();
+        assert_eq!(node.priority, 200);
+        assert_eq!(node.backend, BackendType::LlamaServer);
+        assert_eq!(node.gpu_vendor.as_deref(), Some("nvidia"));
     }
 }
