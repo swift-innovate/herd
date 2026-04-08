@@ -181,7 +181,10 @@ pub async fn update_backend(
         state.pool.set_vram(&name, vram_mb).await;
         // Re-fetch so the response reflects the override
         backend = state.pool.get(&name).await.ok_or_else(|| {
-            (StatusCode::NOT_FOUND, format!("Backend '{}' not found", name))
+            (
+                StatusCode::NOT_FOUND,
+                format!("Backend '{}' not found", name),
+            )
         })?;
     }
 
