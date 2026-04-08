@@ -282,7 +282,7 @@ pub async fn search_models(
             ("direction", "-1"),
             ("limit", "20"),
         ])
-        .header("User-Agent", "herd/0.9.0")
+        .header("User-Agent", "herd/1.0.0")
         .send()
         .await
         .map_err(|e| {
