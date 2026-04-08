@@ -1,9 +1,5 @@
 use crate::server::AppState;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -23,9 +19,7 @@ pub struct ProfileSummary {
 }
 
 /// GET /api/profiles — list all configured routing profiles
-pub async fn list_profiles(
-    State(state): State<AppState>,
-) -> Json<ProfilesResponse> {
+pub async fn list_profiles(State(state): State<AppState>) -> Json<ProfilesResponse> {
     let config = state.config.read().await;
     let pc = &config.routing_profiles;
 
@@ -66,7 +60,9 @@ pub async fn set_default_profile(
     let mut config = state.config.write().await;
 
     // Validate that the profile exists (if profiles are enabled)
-    if config.routing_profiles.enabled && !config.routing_profiles.profiles.contains_key(&body.profile) {
+    if config.routing_profiles.enabled
+        && !config.routing_profiles.profiles.contains_key(&body.profile)
+    {
         return Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({

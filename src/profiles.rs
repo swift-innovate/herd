@@ -219,7 +219,10 @@ routing_profiles:
             resolved.preferred_model.as_deref(),
             Some("qwen2.5-coder:32b")
         );
-        assert_eq!(resolved.tags, vec!["gpu".to_string(), "high-vram".to_string()]);
+        assert_eq!(
+            resolved.tags,
+            vec!["gpu".to_string(), "high-vram".to_string()]
+        );
     }
 
     #[test]

@@ -552,10 +552,8 @@ pub async fn delete_node_model(
 // GET /api/ollama/models — list all locally available Ollama model blobs
 // ---------------------------------------------------------------------------
 
-pub async fn list_ollama_blobs() -> Result<
-    Json<Vec<crate::blob::ExtractedModel>>,
-    (StatusCode, Json<serde_json::Value>),
-> {
+pub async fn list_ollama_blobs(
+) -> Result<Json<Vec<crate::blob::ExtractedModel>>, (StatusCode, Json<serde_json::Value>)> {
     match crate::blob::list_ollama_models() {
         Ok(models) => Ok(Json(models)),
         Err(e) => {
@@ -608,26 +606,26 @@ pub async fn extract_ollama_blob(
     let target_path = req.target_path.clone();
     let target = std::path::PathBuf::from(&target_path);
 
-    let result = tokio::task::spawn_blocking(move || {
-        crate::blob::extract_to(&model, &tag, &target)
-    })
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Task join error: {}", e)})),
-        )
-    })?
-    .map_err(|e| {
-        let msg = e.to_string();
-        let status = if msg.contains("Cannot read manifest") || msg.contains("Blob file not found")
-        {
-            StatusCode::NOT_FOUND
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        };
-        (status, Json(serde_json::json!({"error": msg})))
-    })?;
+    let result =
+        tokio::task::spawn_blocking(move || crate::blob::extract_to(&model, &tag, &target))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Task join error: {}", e)})),
+                )
+            })?
+            .map_err(|e| {
+                let msg = e.to_string();
+                let status = if msg.contains("Cannot read manifest")
+                    || msg.contains("Blob file not found")
+                {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                (status, Json(serde_json::json!({"error": msg})))
+            })?;
 
     Ok(Json(ExtractResponse {
         model: result.model,

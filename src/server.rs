@@ -797,19 +797,21 @@ impl Server {
     /// ran (and eventually shut down), or Err if TLS setup failed so the caller can
     /// report the issue.
     #[cfg(feature = "tls")]
-    async fn try_start_tls(
-        &self,
-        addr: &str,
-        app: axum::Router,
-    ) -> Result<()> {
+    async fn try_start_tls(&self, addr: &str, app: axum::Router) -> Result<()> {
         use axum_server::tls_rustls::RustlsConfig;
 
-        let cert_path = self.config.tls.cert_path.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("TLS enabled but cert_path is not set")
-        })?;
-        let key_path = self.config.tls.key_path.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("TLS enabled but key_path is not set")
-        })?;
+        let cert_path = self
+            .config
+            .tls
+            .cert_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("TLS enabled but cert_path is not set"))?;
+        let key_path = self
+            .config
+            .tls
+            .key_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("TLS enabled but key_path is not set"))?;
 
         if !std::path::Path::new(cert_path).exists() {
             anyhow::bail!("TLS cert_path does not exist: {}", cert_path);
@@ -863,7 +865,8 @@ impl Server {
                 let redirect_addr = format!("{}:{}", host, redirect_port);
                 match tokio::net::TcpListener::bind(&redirect_addr).await {
                     Ok(listener) => {
-                        if let Err(e) = axum::serve(listener, redirect_app.into_make_service()).await
+                        if let Err(e) =
+                            axum::serve(listener, redirect_app.into_make_service()).await
                         {
                             tracing::error!("HTTP redirect listener failed: {}", e);
                         }

@@ -261,10 +261,7 @@ mod tests {
         for _ in 0..5 {
             assert!(limiter.check_rate_limit(Some("sk-client-1")).await.is_ok());
         }
-        assert!(limiter
-            .check_rate_limit(Some("sk-client-1"))
-            .await
-            .is_err());
+        assert!(limiter.check_rate_limit(Some("sk-client-1")).await.is_err());
 
         // Global still has its own 2
         assert!(limiter.check_rate_limit(None).await.is_ok());
@@ -277,18 +274,9 @@ mod tests {
         let config = make_config(2, vec![]);
         let limiter = RateLimiter::new(&config);
 
-        assert!(limiter
-            .check_rate_limit(Some("sk-unknown"))
-            .await
-            .is_ok());
-        assert!(limiter
-            .check_rate_limit(Some("sk-unknown"))
-            .await
-            .is_ok());
-        assert!(limiter
-            .check_rate_limit(Some("sk-unknown"))
-            .await
-            .is_err());
+        assert!(limiter.check_rate_limit(Some("sk-unknown")).await.is_ok());
+        assert!(limiter.check_rate_limit(Some("sk-unknown")).await.is_ok());
+        assert!(limiter.check_rate_limit(Some("sk-unknown")).await.is_err());
     }
 
     #[tokio::test]
@@ -336,10 +324,7 @@ mod tests {
 
         // Client with rate_limit=0 should be truly unlimited, bypassing global
         for _ in 0..100 {
-            assert!(limiter
-                .check_rate_limit(Some("sk-unlimited"))
-                .await
-                .is_ok());
+            assert!(limiter.check_rate_limit(Some("sk-unlimited")).await.is_ok());
         }
 
         // Global still has its own limit of 1

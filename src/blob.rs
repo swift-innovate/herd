@@ -53,7 +53,8 @@ pub fn ollama_models_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("OLLAMA_MODELS") {
         return Ok(PathBuf::from(dir));
     }
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     Ok(home.join(".ollama").join("models"))
 }
 
@@ -98,8 +99,14 @@ fn resolve_blob_path_in(model: &str, tag: &str, models_dir: &Path) -> Result<Ext
         .join(model)
         .join(tag);
 
-    let data = std::fs::read(&manifest_path)
-        .with_context(|| format!("Cannot read manifest for {}:{} at {}", model, tag, manifest_path.display()))?;
+    let data = std::fs::read(&manifest_path).with_context(|| {
+        format!(
+            "Cannot read manifest for {}:{} at {}",
+            model,
+            tag,
+            manifest_path.display()
+        )
+    })?;
 
     let manifest = parse_manifest(&data)?;
     let layer = find_model_layer(&manifest)?;
@@ -176,12 +183,7 @@ fn list_ollama_models_in(models_dir: &Path) -> Result<Vec<ExtractedModel>> {
             match resolve_blob_path_in(&model_name, &tag, models_dir) {
                 Ok(extracted) => results.push(extracted),
                 Err(e) => {
-                    tracing::debug!(
-                        "Skipping {}:{} — {}",
-                        model_name,
-                        tag,
-                        e
-                    );
+                    tracing::debug!("Skipping {}:{} — {}", model_name, tag, e);
                 }
             }
         }
@@ -291,18 +293,12 @@ mod tests {
 
     #[test]
     fn digest_to_blob_name_replaces_colon() {
-        assert_eq!(
-            digest_to_blob_name("sha256:abc123"),
-            "sha256-abc123"
-        );
+        assert_eq!(digest_to_blob_name("sha256:abc123"), "sha256-abc123");
     }
 
     #[test]
     fn digest_to_blob_name_only_first_colon() {
-        assert_eq!(
-            digest_to_blob_name("sha256:abc:extra"),
-            "sha256-abc:extra"
-        );
+        assert_eq!(digest_to_blob_name("sha256:abc:extra"), "sha256-abc:extra");
     }
 
     #[test]
@@ -316,7 +312,10 @@ mod tests {
     fn invalid_manifest_json_returns_error() {
         let result = parse_manifest(b"not json at all");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid Ollama manifest"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid Ollama manifest"));
     }
 
     #[test]

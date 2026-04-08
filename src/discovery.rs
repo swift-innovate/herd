@@ -75,11 +75,7 @@ impl NodeDiscovery {
         };
 
         if !healthy {
-            tracing::debug!(
-                "Static node {} ({}) unreachable",
-                hostname,
-                base_url
-            );
+            tracing::debug!("Static node {} ({}) unreachable", hostname, base_url);
             return;
         }
 
@@ -96,19 +92,11 @@ impl NodeDiscovery {
         match node_db.upsert_node(&reg) {
             Ok((_id, is_new)) => {
                 if is_new {
-                    tracing::info!(
-                        "Discovered static node: {} ({})",
-                        hostname,
-                        base_url
-                    );
+                    tracing::info!("Discovered static node: {} ({})", hostname, base_url);
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "Failed to register static node {}: {}",
-                    hostname,
-                    e
-                );
+                tracing::warn!("Failed to register static node {}: {}", hostname, e);
             }
         }
     }

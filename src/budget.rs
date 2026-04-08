@@ -256,9 +256,7 @@ mod tests {
         let tracker = BudgetTracker::new(make_config(true, 100.0, "reject"));
         tracker.record_cost(Some("alice"), "llama3:8b", 1.5).await;
         tracker.record_cost(Some("alice"), "llama3:8b", 2.5).await;
-        tracker
-            .record_cost(Some("bob"), "qwen2:14b", 3.0)
-            .await;
+        tracker.record_cost(Some("bob"), "qwen2:14b", 3.0).await;
 
         let summary = tracker.get_summary().await;
         assert!((summary.global_spend - 7.0).abs() < 0.001);
@@ -367,8 +365,7 @@ mod tests {
 
         // Force the period start to the past
         {
-            *tracker.period_start.write().await =
-                chrono::Utc::now() - chrono::Duration::days(32);
+            *tracker.period_start.write().await = chrono::Utc::now() - chrono::Duration::days(32);
         }
 
         tracker.reset_if_needed().await;
