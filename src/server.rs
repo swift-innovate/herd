@@ -1103,12 +1103,12 @@ async fn proxy_handler(
                     "limit": limit,
                     "current": current,
                 });
-                return Ok(axum::response::Response::builder()
+                return axum::response::Response::builder()
                     .status(axum::http::StatusCode::TOO_MANY_REQUESTS)
                     .header("content-type", "application/json")
                     .header("x-request-id", &request_id)
                     .body(axum::body::Body::from(body.to_string()))
-                    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?);
+                    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR);
             }
             crate::budget::BudgetStatus::Warning {
                 cap_type,

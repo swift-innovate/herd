@@ -548,7 +548,7 @@ fn default_budget_action() -> String {
     "reject".to_string()
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveryConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -564,6 +564,17 @@ pub struct DiscoveryConfig {
     /// How often to re-probe static nodes (seconds). Default: 60.
     #[serde(default = "default_probe_interval")]
     pub probe_interval_secs: u64,
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            static_nodes: Vec::new(),
+            mdns: MdnsConfig::default(),
+            probe_interval_secs: default_probe_interval(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1109,5 +1120,52 @@ backends:
         assert_eq!(config.server.rate_limit, 10);
         assert_eq!(config.rate_limiting.global, 0);
         assert_eq!(config.effective_global_rate_limit(), 10);
+    }
+
+    #[test]
+    fn budget_config_defaults_disabled() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert!(!config.budget.enabled);
+        assert!((config.budget.global_limit_usd).abs() < 0.001);
+        assert_eq!(config.budget.reset_period, "monthly");
+        assert_eq!(config.budget.action, "reject");
+        assert!(config.budget.clients.is_empty());
+        assert!(config.budget.models.is_empty());
+    }
+
+    #[test]
+    fn budget_config_deserializes_from_yaml() {
+        let yaml = r#"
+budget:
+  enabled: true
+  global_limit_usd: 50.0
+  reset_period: daily
+  action: warn
+  clients:
+    agent-team: 20.0
+  models:
+    "llama3:70b": 30.0
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.budget.enabled);
+        assert!((config.budget.global_limit_usd - 50.0).abs() < 0.001);
+        assert_eq!(config.budget.reset_period, "daily");
+        assert_eq!(config.budget.action, "warn");
+        assert!((config.budget.clients["agent-team"] - 20.0).abs() < 0.001);
+        assert!((config.budget.models["llama3:70b"] - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn budget_config_backward_compat_no_budget_section() {
+        let yaml = r#"
+server:
+  host: 0.0.0.0
+backends:
+  - name: gpu1
+    url: http://localhost:11434
+    priority: 100
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!config.budget.enabled);
     }
 }
