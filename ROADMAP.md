@@ -79,21 +79,24 @@ No cloud dependency. No API keys exposed. Full local control.
 - Dashboard: Sessions, Fleet, and Settings (config editor) tabs
 - Config editor API (`GET/PUT /admin/config`) with secret redaction
 
-### v1.0.0 — llama.cpp Backend & Multi-Vendor Fleet
+### v1.0.0 — llama.cpp Backend & Multi-Vendor Fleet ✅
 
 > **Strategic shift:** Benchmarking validated that Ollama's Go layer adds 45-80% TTFT overhead vs raw llama-server. Herd v1.0 adds llama-server as a first-class backend, making Herd vendor-agnostic across NVIDIA, AMD, and Intel GPUs. See `docs/LLAMA_CPP_BACKEND.md` for full analysis and benchmark data.
 
-- **llama-server backend support** — route to llama-server (llama.cpp) endpoints alongside Ollama
-- **Backend type field** — `backend: "ollama" | "llama-server" | "openai-compat"` per node in config and registry
-- **herd-tune GPU detection** — auto-detect NVIDIA (nvidia-smi), AMD (rocm-smi), Intel (sycl-ls) and select correct llama-server binary
-- **herd-tune binary provisioning** — download and verify correct llama-server build (CUDA 12/13, ROCm, SYCL, Vulkan fallback)
-- **Blackwell detection** — CUDA 13.x required for RTX 5000-series; CUDA 12.x silently falls back to CPU (critical herd-tune check)
-- **Extended node registration** — `gpu_vendor`, `gpu_backend`, `cuda_version`, `backend_version`, `capabilities` fields
-- **Model search CLI** — `herd search <query>` for HuggingFace GGUF discovery (inspired by Fox engine UX)
-- **Model download with resume** — robust GGUF pull with partial download tracking
-- **Ollama blob extraction** — reuse existing Ollama models by extracting raw GGUF from blob storage
-- **Health check abstraction** — backend-aware health probes (Ollama `/api/ps` vs llama-server `/health`)
-- Backward compatible — existing Ollama-only configs continue to work unchanged
+- ~~**llama-server backend support** — route to llama-server (llama.cpp) endpoints alongside Ollama~~ ✅
+- ~~**Backend type field** — `backend: "ollama" | "llama-server" | "openai-compat"` per node in config and registry~~ ✅
+- ~~**herd-tune GPU detection** — auto-detect NVIDIA (nvidia-smi), AMD (rocm-smi), Intel (sycl-ls) and select correct llama-server binary~~ ✅
+- ~~**herd-tune binary provisioning** — download and verify correct llama-server build (CUDA 12/13, ROCm, SYCL, Vulkan fallback)~~ ✅
+- ~~**Blackwell detection** — CUDA 13.x required for RTX 5000-series; CUDA 12.x silently falls back to CPU (critical herd-tune check)~~ ✅
+- ~~**Extended node registration** — `gpu_vendor`, `gpu_backend`, `cuda_version`, `backend_version`, `capabilities` fields~~ ✅
+- ~~**Model search CLI** — `herd search <query>` for HuggingFace GGUF discovery (inspired by Fox engine UX)~~ ✅ (API endpoint, CLI wrapper deferred)
+- ~~**Model download with resume** — robust GGUF pull with partial download tracking~~ ✅ (DB tracking ready, Ollama pull proxied)
+- **Ollama blob extraction** — reuse existing Ollama models by extracting raw GGUF from blob storage *(deferred to v1.1)*
+- ~~**Health check abstraction** — backend-aware health probes (Ollama `/api/ps` vs llama-server `/health`)~~ ✅
+- ~~Backward compatible — existing Ollama-only configs continue to work unchanged~~ ✅
+- ~~**Telemetry enrichment** — token counts, per-model/backend latency, cost estimation, Prometheus metrics~~ ✅
+- ~~**Dashboard control plane** — Models tab with HF search, Fleet GPU badges, analytics visualizations~~ ✅
+- ~~**HuggingFace model search API** — search, download, VRAM compatibility~~ ✅
 
 ### v1.1.0+ — Scale & Ecosystem (Future)
 
