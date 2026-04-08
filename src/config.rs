@@ -185,6 +185,16 @@ pub struct Backend {
     pub tags: Vec<String>,
 }
 
+impl Backend {
+    /// Default health check path based on backend type.
+    pub fn default_health_check_path(&self) -> &str {
+        match self.backend {
+            BackendType::LlamaServer => "/health",
+            BackendType::Ollama => "/",
+        }
+    }
+}
+
 impl Default for Backend {
     fn default() -> Self {
         Self {
