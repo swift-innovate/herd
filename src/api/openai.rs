@@ -93,6 +93,7 @@ pub async fn chat_completions(
     let mut auto_tier: Option<String> = None;
     let mut auto_capability: Option<String> = None;
     let mut auto_model: Option<String> = None;
+    let mut auto_classification: Option<crate::classifier_auto::Classification> = None;
     if crate::classifier_auto::should_auto_classify(model_name.as_deref()) {
         let auto_config = state.config.read().await.routing.auto.clone();
         if auto_config.enabled {
@@ -105,7 +106,7 @@ pub async fn chat_completions(
                 let ck = crate::classifier_auto::cache_key(&user_message);
                 let ttl = std::time::Duration::from_secs(auto_config.cache_ttl_secs);
 
-                let classification = if let Some(cached) = state.auto_cache.get(&ck, ttl) {
+                auto_classification = if let Some(cached) = state.auto_cache.get(&ck, ttl) {
                     state
                         .metrics
                         .record_auto_classification(&cached.tier, &cached.capability, 0, true)
@@ -146,7 +147,7 @@ pub async fn chat_completions(
                     }
                 };
 
-                let resolved = if let Some(ref c) = classification {
+                let resolved = if let Some(ref c) = auto_classification {
                     auto_tier = Some(c.tier.clone());
                     auto_capability = Some(c.capability.clone());
                     crate::classifier_auto::resolve_model(
@@ -166,6 +167,46 @@ pub async fn chat_completions(
                     model_name = Some(resolved);
                 }
             }
+        }
+    }
+
+    // Frontier gateway: escalate to cloud provider if model resolved to a
+    // frontier model (either explicitly by the client or via auto mode).
+    let frontier_config = state.config.read().await.frontier.clone();
+    let provider_configs = state.config.read().await.providers.clone();
+
+    if let Some(response) = crate::providers::frontier_route_if_applicable(
+        &state.client,
+        &frontier_config,
+        &provider_configs,
+        &state.cost_db,
+        model_name.as_deref(),
+        &headers,
+        auto_classification.as_ref(),
+        &body_bytes,
+        &request_id,
+    )
+    .await
+    {
+        return Ok(response);
+    }
+
+    // If auto classified to frontier tier but the gateway declined to handle
+    // it (disabled, escalation blocked, or no matching provider), fall back
+    // to the configured fallback_model so we don't try to route a frontier
+    // model name to a local backend.
+    if auto_tier.as_deref() == Some("frontier") {
+        let fallback = state
+            .config
+            .read()
+            .await
+            .routing
+            .auto
+            .fallback_model
+            .clone();
+        if !fallback.is_empty() {
+            auto_model = Some(fallback.clone());
+            model_name = Some(fallback);
         }
     }
 
