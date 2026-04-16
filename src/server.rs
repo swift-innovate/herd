@@ -137,6 +137,8 @@ pub struct AppState {
     pub node_db: Arc<crate::nodes::NodeDb>,
     pub budget: Arc<crate::budget::BudgetTracker>,
     pub rate_limiter: Arc<crate::rate_limit::RateLimiter>,
+    pub frontier_rate_limiter:
+        Arc<tokio::sync::RwLock<crate::providers::rate_limit::ProviderRateLimiter>>,
     pub auto_cache: Arc<crate::classifier_auto::ClassificationCache>,
     pub cost_db: Arc<crate::providers::cost_db::CostDb>,
     pub routing_timeout_ms: Arc<AtomicU64>,
@@ -259,6 +261,11 @@ impl AppState {
         self.routing_retry_count
             .store(new_config.routing.retry_count, Ordering::Relaxed);
         self.budget.update_config(new_config.budget.clone()).await;
+
+        // Rebuild the per-provider rate limiter (tokens reset, new providers picked up)
+        *self.frontier_rate_limiter.write().await =
+            crate::providers::rate_limit::ProviderRateLimiter::new(&new_config.providers);
+
         *self.config.write().await = new_config.clone();
 
         let mut msg = format!(
@@ -449,6 +456,9 @@ impl Server {
             rl_config.global = self.config.server.rate_limit;
         }
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(&rl_config));
+        let frontier_rate_limiter = Arc::new(tokio::sync::RwLock::new(
+            crate::providers::rate_limit::ProviderRateLimiter::new(&self.config.providers),
+        ));
 
         let state = AppState {
             pool: Arc::clone(&pool),
@@ -463,6 +473,7 @@ impl Server {
             node_db,
             budget,
             rate_limiter,
+            frontier_rate_limiter,
             auto_cache: Arc::new(crate::classifier_auto::ClassificationCache::new(1000)),
             cost_db,
             routing_timeout_ms: Arc::new(AtomicU64::new(routing_timeout.as_millis() as u64)),
@@ -1227,11 +1238,13 @@ async fn proxy_handler(
     let frontier_config = state.config.read().await.frontier.clone();
     let provider_configs = state.config.read().await.providers.clone();
 
+    let frontier_limiter = state.frontier_rate_limiter.read().await;
     if let Some(response) = crate::providers::frontier_route_if_applicable(
         &state.client,
         &frontier_config,
         &provider_configs,
         &state.cost_db,
+        &frontier_limiter,
         model_name.as_deref(),
         &headers,
         auto_classification.as_ref(),
@@ -1242,6 +1255,7 @@ async fn proxy_handler(
     {
         return Ok(response);
     }
+    drop(frontier_limiter);
 
     // Prepare both versions of the body — keep_alive is Ollama-specific
     let keep_alive_value = state.config.read().await.routing.default_keep_alive.clone();
@@ -2185,6 +2199,9 @@ mod tests {
             node_db: Arc::new(crate::nodes::NodeDb::open().unwrap()),
             budget: crate::budget::BudgetTracker::new(initial.budget.clone()),
             rate_limiter: Arc::new(crate::rate_limit::RateLimiter::new(&initial.rate_limiting)),
+            frontier_rate_limiter: Arc::new(tokio::sync::RwLock::new(
+                crate::providers::rate_limit::ProviderRateLimiter::new(&initial.providers),
+            )),
             auto_cache: Arc::new(crate::classifier_auto::ClassificationCache::new(1000)),
             cost_db: Arc::new(crate::providers::cost_db::CostDb::new(
                 rusqlite::Connection::open_in_memory().unwrap(),

@@ -7,7 +7,9 @@
 use axum::http::HeaderMap;
 use herd::classifier_auto::Classification;
 use herd::config::{FrontierConfig, ProviderConfig};
-use herd::providers::{cost_db::CostDb, frontier_route_if_applicable};
+use herd::providers::{
+    cost_db::CostDb, frontier_route_if_applicable, rate_limit::ProviderRateLimiter,
+};
 use rusqlite::Connection;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -60,6 +62,11 @@ fn in_memory_cost_db() -> CostDb {
     CostDb::new(conn)
 }
 
+fn unlimited_rate_limiter() -> ProviderRateLimiter {
+    // No providers registered => try_acquire always returns true (rate-limiting disabled).
+    ProviderRateLimiter::new(&[])
+}
+
 fn frontier_tier() -> Classification {
     Classification {
         tier: "frontier".to_string(),
@@ -86,6 +93,7 @@ async fn returns_none_when_frontier_disabled() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let headers = HeaderMap::new();
 
     let result = frontier_route_if_applicable(
@@ -93,6 +101,7 @@ async fn returns_none_when_frontier_disabled() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("claude-sonnet-4"),
         &headers,
         Some(&frontier_tier()),
@@ -120,6 +129,7 @@ async fn returns_none_for_non_frontier_model() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let headers = HeaderMap::new();
 
     let result = frontier_route_if_applicable(
@@ -127,6 +137,7 @@ async fn returns_none_for_non_frontier_model() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("qwen3:8b"),
         &headers,
         None,
@@ -159,6 +170,7 @@ async fn blocks_auto_escalation_when_flag_disabled() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let headers = HeaderMap::new();
 
     let result = frontier_route_if_applicable(
@@ -166,6 +178,7 @@ async fn blocks_auto_escalation_when_flag_disabled() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("claude-sonnet-4"),
         &headers,
         Some(&frontier_tier()),
@@ -195,6 +208,7 @@ async fn rejects_with_403_when_header_required_and_missing() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let headers = HeaderMap::new();
 
     // Explicit model (no auto classification), require_header=true, no header.
@@ -203,6 +217,7 @@ async fn rejects_with_403_when_header_required_and_missing() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("claude-sonnet-4"),
         &headers,
         None,
@@ -245,6 +260,7 @@ async fn auto_escalation_bypasses_header_requirement() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let headers = HeaderMap::new();
 
     let result = frontier_route_if_applicable(
@@ -252,6 +268,7 @@ async fn auto_escalation_bypasses_header_requirement() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("mock-frontier-model"),
         &headers,
         Some(&frontier_tier()),
@@ -306,6 +323,7 @@ async fn explicit_header_allows_direct_frontier_call() {
         ..Default::default()
     };
     let cost_db = in_memory_cost_db();
+    let rate_limiter = unlimited_rate_limiter();
     let mut headers = HeaderMap::new();
     headers.insert("x-herd-frontier", "true".parse().unwrap());
 
@@ -314,6 +332,7 @@ async fn explicit_header_allows_direct_frontier_call() {
         &cfg,
         &providers,
         &cost_db,
+        &rate_limiter,
         Some("mock-explicit-model"),
         &headers,
         None,
@@ -327,5 +346,178 @@ async fn explicit_header_allows_direct_frontier_call() {
         response.status(),
         axum::http::StatusCode::OK,
         "explicit X-Herd-Frontier: true header must allow direct call"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// v1.1.2 — Per-provider rate limiting and cost recording
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn rate_limit_returns_429_when_exhausted() {
+    // Build a limiter with rate_limit=1 so the second request trips the cap.
+    let providers = vec![ProviderConfig {
+        name: "ratelimited".to_string(),
+        api_url: "https://api.example.com".to_string(),
+        api_key_env: "TEST_RATELIMITED_KEY".to_string(),
+        models: vec!["rl-model".to_string()],
+        priority: 100,
+        rate_limit: 1,
+        ..Default::default()
+    }];
+    let limiter = ProviderRateLimiter::new(&providers);
+
+    // First acquire consumes the only token.
+    assert!(limiter.try_acquire("ratelimited"));
+
+    // Now the helper call should get blocked with 429.
+    let client = reqwest::Client::new();
+    let cfg = FrontierConfig {
+        enabled: true,
+        require_header: false,
+        ..Default::default()
+    };
+    let cost_db = in_memory_cost_db();
+    let headers = HeaderMap::new();
+
+    let result = frontier_route_if_applicable(
+        &client,
+        &cfg,
+        &providers,
+        &cost_db,
+        &limiter,
+        Some("rl-model"),
+        &headers,
+        None,
+        b"{}",
+        "req-rl-1",
+    )
+    .await;
+
+    let response = result.expect("helper must return a 429 response");
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        "exceeded rate limit must yield 429"
+    );
+}
+
+#[tokio::test]
+async fn non_streaming_response_records_cost_and_emits_header() {
+    // Canned response with usage fields that billing::record_frontier_cost
+    // can extract + price. gpt-4.1 has a built-in rate of $2 in / $8 out per Mtok.
+    let mock_response = r#"{"id":"chatcmpl-a","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1000000,"completion_tokens":500000,"total_tokens":1500000}}"#;
+    let (mock_url, _notify) = spawn_mock_provider(mock_response).await;
+
+    std::env::set_var("TEST_BILLING_KEY", "sk-test");
+
+    let providers = vec![ProviderConfig {
+        name: "billing".to_string(),
+        api_url: mock_url,
+        api_key_env: "TEST_BILLING_KEY".to_string(),
+        models: vec!["gpt-4.1".to_string()],
+        priority: 100,
+        ..Default::default()
+    }];
+    let limiter = ProviderRateLimiter::new(&providers);
+    let cfg = FrontierConfig {
+        enabled: true,
+        require_header: false,
+        ..Default::default()
+    };
+    let cost_db = in_memory_cost_db();
+    let client = reqwest::Client::new();
+    let headers = HeaderMap::new();
+
+    let result = frontier_route_if_applicable(
+        &client,
+        &cfg,
+        &providers,
+        &cost_db,
+        &limiter,
+        Some("gpt-4.1"),
+        &headers,
+        None,
+        // Request body with stream omitted (defaults to non-streaming)
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+        "req-billing-1",
+    )
+    .await;
+
+    let response = result.expect("helper must return a response");
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let cost_header = response
+        .headers()
+        .get("x-herd-cost-estimate")
+        .expect("non-streaming response must emit X-Herd-Cost-Estimate");
+    let cost: f32 = cost_header.to_str().unwrap().parse().unwrap();
+    // 1M prompt * $2 + 0.5M completion * $8 = $6.00
+    assert!(
+        (cost - 6.0).abs() < 0.01,
+        "expected cost ~6.00 USD, got {}",
+        cost
+    );
+
+    // Cost row was actually persisted.
+    let summary = cost_db.cost_summary().expect("cost summary query");
+    let billing_row = summary
+        .iter()
+        .find(|r| r.provider == "billing")
+        .expect("billing provider should have a row");
+    assert_eq!(billing_row.total_tokens_in, 1_000_000);
+    assert_eq!(billing_row.total_tokens_out, 500_000);
+    assert_eq!(billing_row.request_count, 1);
+}
+
+#[tokio::test]
+async fn streaming_response_passes_through_without_cost_recording() {
+    // When the client requests stream=true, we don't buffer the response and
+    // therefore skip cost recording. The response must still flow through.
+    let mock_response =
+        r#"{"id":"chatcmpl-s","choices":[{"message":{"role":"assistant","content":"ok"}}]}"#;
+    let (mock_url, _notify) = spawn_mock_provider(mock_response).await;
+
+    std::env::set_var("TEST_STREAM_KEY", "sk-test");
+
+    let providers = vec![ProviderConfig {
+        name: "streaming".to_string(),
+        api_url: mock_url,
+        api_key_env: "TEST_STREAM_KEY".to_string(),
+        models: vec!["gpt-4.1".to_string()],
+        priority: 100,
+        ..Default::default()
+    }];
+    let limiter = ProviderRateLimiter::new(&providers);
+    let cfg = FrontierConfig {
+        enabled: true,
+        require_header: false,
+        ..Default::default()
+    };
+    let cost_db = in_memory_cost_db();
+    let client = reqwest::Client::new();
+    let headers = HeaderMap::new();
+
+    let result = frontier_route_if_applicable(
+        &client,
+        &cfg,
+        &providers,
+        &cost_db,
+        &limiter,
+        Some("gpt-4.1"),
+        &headers,
+        None,
+        br#"{"messages":[{"role":"user","content":"hi"}],"stream":true}"#,
+        "req-stream-1",
+    )
+    .await;
+
+    let response = result.expect("helper must return a response");
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Streaming path explicitly does not emit X-Herd-Cost-Estimate.
+    assert!(
+        response.headers().get("x-herd-cost-estimate").is_none(),
+        "streaming response must not emit X-Herd-Cost-Estimate"
     );
 }

@@ -1,7 +1,9 @@
 pub mod anthropic;
+pub mod billing;
 pub mod cost_db;
 pub mod openai_compat;
 pub mod pricing;
+pub mod rate_limit;
 
 use crate::config::{FrontierConfig, ProviderConfig};
 use anyhow::Result;
@@ -189,6 +191,7 @@ pub async fn frontier_route_if_applicable(
     frontier_config: &FrontierConfig,
     providers: &[ProviderConfig],
     cost_db: &cost_db::CostDb,
+    rate_limiter: &rate_limit::ProviderRateLimiter,
     model_name: Option<&str>,
     headers: &axum::http::HeaderMap,
     auto_classification: Option<&crate::classifier_auto::Classification>,
@@ -233,7 +236,29 @@ pub async fn frontier_route_if_applicable(
         }
     }
 
+    // Per-provider rate limit check. We resolve the provider here (the proxy
+    // call will resolve again; this duplication is cheap — providers is tiny).
+    let resolved_provider_name = resolve_provider(model, providers).map(|p| p.name.clone());
+    if let Some(ref pname) = resolved_provider_name {
+        if !rate_limiter.try_acquire(pname) {
+            tracing::warn!(
+                provider = %pname,
+                model = %model,
+                "Frontier rate limit exceeded — returning 429"
+            );
+            return Some(build_frontier_error_response(
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                &format!("Provider '{}' rate limit exceeded", pname),
+                request_id,
+            ));
+        }
+    }
+
     let body_json = serde_json::from_slice::<serde_json::Value>(body_bytes).unwrap_or_default();
+    let stream_requested = body_json
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     match proxy_frontier_request(
         client,
@@ -274,8 +299,50 @@ pub async fn frontier_route_if_applicable(
                 }
             }
 
-            let body = axum::body::Body::from_stream(result.response.bytes_stream());
-            Some(builder.body(body).unwrap_or_default())
+            // For non-streaming JSON responses we can buffer, parse usage, and
+            // record cost. Streaming responses (SSE) are passed through as-is;
+            // streaming cost tracking requires SSE chunk parsing and is left
+            // for a later sprint.
+            if !stream_requested && status_code.is_success() {
+                match result.response.bytes().await {
+                    Ok(bytes) => {
+                        if let Ok(body_value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                        {
+                            if let Some(provider_cfg) =
+                                providers.iter().find(|p| p.name == provider_name)
+                            {
+                                if let Some(cost) = billing::record_frontier_cost(
+                                    cost_db,
+                                    provider_cfg,
+                                    model,
+                                    &body_value,
+                                    Some(request_id),
+                                ) {
+                                    builder = builder
+                                        .header("x-herd-cost-estimate", format!("{:.6}", cost));
+                                }
+                            }
+                        }
+                        Some(
+                            builder
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap_or_default(),
+                        )
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to buffer frontier response body: {}", e);
+                        Some(build_frontier_error_response(
+                            axum::http::StatusCode::BAD_GATEWAY,
+                            &format!("Upstream response error: {}", e),
+                            request_id,
+                        ))
+                    }
+                }
+            } else {
+                // Streaming or non-success response: pass through without buffering.
+                let body = axum::body::Body::from_stream(result.response.bytes_stream());
+                Some(builder.body(body).unwrap_or_default())
+            }
         }
         Err(e) => {
             tracing::warn!("Frontier gateway error: {}", e);

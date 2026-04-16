@@ -175,11 +175,13 @@ pub async fn chat_completions(
     let frontier_config = state.config.read().await.frontier.clone();
     let provider_configs = state.config.read().await.providers.clone();
 
+    let frontier_limiter = state.frontier_rate_limiter.read().await;
     if let Some(response) = crate::providers::frontier_route_if_applicable(
         &state.client,
         &frontier_config,
         &provider_configs,
         &state.cost_db,
+        &frontier_limiter,
         model_name.as_deref(),
         &headers,
         auto_classification.as_ref(),
@@ -190,6 +192,7 @@ pub async fn chat_completions(
     {
         return Ok(response);
     }
+    drop(frontier_limiter);
 
     // If auto classified to frontier tier but the gateway declined to handle
     // it (disabled, escalation blocked, or no matching provider), fall back
