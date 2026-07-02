@@ -58,4 +58,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit --locked
-      - run: cargo audit
+      # RUSTSEC-2026-0194 / -0195: DoS advisories in quick-xml, pulled in
+      # transitively by self_update. Ignored deliberately: (1) herd uses
+      # self_update's GitHub backend, which parses JSON — not quick-xml's XML
+      # path — so the vulnerable code is not on our runtime path; (2) the fix
+      # requires self_update 1.0.0-rc.1, a PRE-RELEASE major bump of the
+      # binary-self-replace mechanism (too risky to ship). Revisit and drop
+      # these ignores when self_update ships a stable 1.0 on patched quick-xml.
+      - run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
