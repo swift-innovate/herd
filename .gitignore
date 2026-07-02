@@ -6,3 +6,7 @@
 *.swo
 *~
 .env
+
+# Playwright MCP verification artifacts
+.playwright-mcp/
+dashboard-nodes*.png

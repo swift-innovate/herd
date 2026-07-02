@@ -699,8 +699,8 @@
 
         <!-- Tab Navigation -->
         <div class="tab-bar">
-            <div class="tab active" data-tab="backends" onclick="switchTab('backends')">
-                Backends <span class="tab-badge" id="backends-count">0</span>
+            <div class="tab active" data-tab="fleet" onclick="switchTab('fleet')">
+                Nodes <span class="tab-badge" id="fleet-tab-badge">0</span>
             </div>
             <div class="tab" data-tab="analytics" onclick="switchTab('analytics')">
                 Analytics
@@ -711,20 +711,12 @@
             <div class="tab" data-tab="agent-guide" onclick="switchTab('agent-guide')">
                 Agent Guide
             </div>
-            <div class="tab" data-tab="fleet" onclick="switchTab('fleet')">
-                Fleet <span class="tab-badge" id="fleet-tab-badge">0</span>
-            </div>
             <div class="tab" data-tab="models" onclick="switchTab('models')">
                 Models
             </div>
             <div class="tab" data-tab="settings" onclick="switchTab('settings')">
                 Settings
             </div>
-        </div>
-
-        <!-- Backends Tab -->
-        <div class="tab-content active" id="tab-backends">
-            <div class="grid" id="backends"></div>
         </div>
 
         <!-- Analytics Tab -->
@@ -972,14 +964,25 @@ Content-Type: application/json
             </div>
         </div>
 
-        <!-- Fleet Tab -->
-        <div class="tab-content" id="tab-fleet">
+        <!-- Fleet / Nodes Tab -->
+        <div class="tab-content active" id="tab-fleet">
             <div class="fleet-add-node">
-                <h3>Add Node to Fleet</h3>
+                <h3>Add a Node</h3>
                 <p>Run the herd-tune script on any machine to auto-detect hardware and register with this Herd instance.</p>
 
+                <!-- Self-enroll one-liner -->
+                <div id="self-enroll-block" style="margin: 16px 0; padding: 14px 16px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: 10px;">
+                    <div style="font-size:13px; font-weight:600; color:#a5b4fc; margin-bottom:8px;">Add THIS machine as a node</div>
+                    <pre id="self-enroll-cmd" style="margin:0 0 8px 0; padding:10px 12px; background:#0f0f1a; border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-size:12px; color:#e2e8f0; white-space:pre-wrap; word-break:break-all; overflow-x:auto;"><code id="self-enroll-cmd-text"></code></pre>
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <button class="btn btn-primary btn-sm" onclick="copyEnrollCmd()">Copy</button>
+                        <span id="self-enroll-os-label" style="font-size:11px; color:#64748b;"></span>
+                    </div>
+                    <p style="margin:8px 0 0 0; font-size:11px; color:#64748b; line-height:1.5;">Browsers can&rsquo;t run local programs &mdash; paste this into a terminal on the machine you want to add.</p>
+                </div>
+
                 <div style="margin: 12px 0;">
-                    <label style="font-size:12px; color:#94a3b8; display:block; margin-bottom:6px;">Backend Type</label>
+                    <label style="font-size:12px; color:#94a3b8; display:block; margin-bottom:6px;">Backend Type (for download buttons below)</label>
                     <select id="fleet-backend-select" onchange="updateFleetScriptLinks()" style="padding:6px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:#1e293b; color:#e2e8f0; font-size:13px;">
                         <option value="auto">Auto-detect</option>
                         <option value="ollama">Ollama</option>
@@ -1006,7 +1009,7 @@ Content-Type: application/json
                                     <li>Download herd-tune.ps1 (button above)</li>
                                     <li>Open PowerShell as Administrator on your machine</li>
                                     <li>Run: <code>.\herd-tune.ps1 -Apply</code></li>
-                                    <li>Done &mdash; your node will appear in the fleet below</li>
+                                    <li>Done &mdash; your node will appear below</li>
                                 </ol>
                             </div>
                             <div>
@@ -1016,7 +1019,7 @@ Content-Type: application/json
                                     <li>On your machine:<br>
                                         <code>chmod +x herd-tune.sh</code><br>
                                         <code>sudo ./herd-tune.sh --apply</code></li>
-                                    <li>Done &mdash; your node will appear in the fleet below</li>
+                                    <li>Done &mdash; your node will appear below</li>
                                 </ol>
                             </div>
                         </div>
@@ -2063,26 +2066,33 @@ Content-Type: application/json
                         }
                     }
                 }
+                // Tag each backend with whether it came from the healthy list, then merge GPU data
+                for (const b of healthy) { b._healthy = true; }
+                for (const b of unhealthy) { b._healthy = false; }
                 for (const b of all) { if (!b.gpu && gpuMap[b.name]) b.gpu = gpuMap[b.name]; }
+
+                // Store static backends globally so renderFleetTable can include them
+                window.staticBackends = all;
 
                 if (nodesRes && nodesRes.ok) {
                     const nodesData = await nodesRes.json();
                     fleetNodes = nodesData.nodes || [];
-                    // Keep fleetNodes fresh every cycle (the infrastructure summary
-                    // below reads it), but only re-render the table when its tab is
-                    // visible — skip the wasted DOM work while the Fleet tab is hidden.
-                    if (document.getElementById('tab-fleet')?.classList.contains('active')) {
-                        renderFleetTable();
-                    }
                 }
+                // Always re-render the nodes table so badge/count stay current
+                renderFleetTable();
 
                 // Update UI
                 document.getElementById('strategy').textContent = data.routing_strategy || '--';
                 document.getElementById('idle-timeout').textContent = timeout;
-                document.getElementById('backends').innerHTML = all.length > 0
-                    ? all.map(b => renderCard(b, timeout)).join('')
-                    : '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-title">No backends configured</div><div class="empty-state-text">Click "+ Add Node" to add an Ollama backend</div></div>';
-                document.getElementById('backends-count').textContent = all.length;
+                // #backends grid is removed; guard in case of cached HTML
+                const bEl = document.getElementById('backends');
+                if (bEl) {
+                    bEl.innerHTML = all.length > 0
+                        ? all.map(b => renderCard(b, timeout)).join('')
+                        : '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-title">No backends configured</div></div>';
+                }
+                const bcEl = document.getElementById('backends-count');
+                if (bcEl) bcEl.textContent = all.length;
                 updateInfrastructureSummary();
 
                 conn.classList.remove('error');
@@ -2237,6 +2247,38 @@ Content-Type: application/json
             currentSessionId = null;
         }
 
+        // -- Self-Enroll One-Liner --
+        function initSelfEnrollCmd() {
+            const origin = window.location.origin;
+            const ua = (navigator.userAgent || '') + '|' + (navigator.platform || '');
+            const isWindows = /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent);
+            let cmd, osLabel;
+            if (isWindows) {
+                cmd = `iwr "${origin}/api/nodes/script?os=windows" -OutFile herd-tune.ps1; ./herd-tune.ps1 -Apply`;
+                osLabel = 'Detected: Windows (PowerShell)';
+            } else {
+                cmd = `curl -fsSL "${origin}/api/nodes/script?os=linux" -o herd-tune.sh && chmod +x herd-tune.sh && sudo ./herd-tune.sh --apply`;
+                osLabel = /Mac/i.test(ua) ? 'Detected: macOS (Bash)' : 'Detected: Linux (Bash)';
+            }
+            const cmdEl = document.getElementById('self-enroll-cmd-text');
+            const labelEl = document.getElementById('self-enroll-os-label');
+            if (cmdEl) cmdEl.textContent = cmd;
+            if (labelEl) labelEl.textContent = osLabel;
+        }
+
+        function copyEnrollCmd() {
+            const cmdEl = document.getElementById('self-enroll-cmd-text');
+            if (!cmdEl) return;
+            const text = cmdEl.textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard')).catch(() => {
+                    showToast('Copy failed — select and copy manually', 'error');
+                });
+            } else {
+                showToast('Copy not supported — select and copy manually', 'error');
+            }
+        }
+
         // -- Fleet Management --
 
         async function fetchFleetNodes() {
@@ -2258,15 +2300,62 @@ Content-Type: application/json
             const badgeEl = document.getElementById('fleet-tab-badge');
             if (!tbody) return;
 
-            countEl.textContent = `(${fleetNodes.length})`;
-            badgeEl.textContent = fleetNodes.length;
+            // Normalize a static config backend into a display row object.
+            // Exclude `agent:`/`node:`-prefixed pool entries — those are the router
+            // pool's MIRRORS of registered fleet nodes (AgentPoolSync), already
+            // shown below from /api/nodes. Only genuine config backends remain.
+            const staticRows = (window.staticBackends || [])
+                .filter(b => !/^(agent|node):/.test(b.name || ''))
+                .map(b => ({
+                _isStatic: true,
+                hostname: b.name,
+                url: b.url,
+                backend: b.backend || 'ollama',
+                backend_version: b.backend_version || null,
+                gpuName: b.gpu ? (b.gpu.name || '\u2014') : '\u2014',
+                // memory_total is in MB (same units renderCard uses: /1024 => GB)
+                vramGB: b.gpu && b.gpu.memory_total ? (b.gpu.memory_total / 1024).toFixed(1) + ' GB' : '\u2014',
+                ramGB: '\u2014',
+                status: b._healthy ? 'healthy' : 'unreachable',
+                models: b.models || [],
+            }));
 
-            if (fleetNodes.length === 0) {
+            const combined = staticRows.length + fleetNodes.length;
+            countEl.textContent = `(${combined})`;
+            badgeEl.textContent = combined;
+
+            if (combined === 0) {
                 tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No nodes registered yet. Download and run herd-tune to add nodes.</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = fleetNodes.map(node => {
+            // Render static config backends first, then registered fleet nodes
+            const staticHtml = staticRows.map(row => {
+                const statusClass = row.status === 'healthy' ? 'status-healthy' : 'status-unreachable';
+                const statusDot = `<span class="status-dot ${statusClass}"></span>`;
+                const bt = row.backend;
+                const btClass = bt === 'llama-server' ? 'llama-server' : bt === 'ollama' ? 'ollama' : 'unknown';
+                const btLabel = bt === 'llama-server' ? 'llama-server' : 'Ollama';
+                const backendBadge = `<span class="badge-backend ${btClass}">${escapeHtml(btLabel)}</span>`;
+                const backendVer = row.backend_version ? `<br><small style="color:#64748b;">${escapeHtml(row.backend_version)}</small>` : '';
+                const modelsHtml = row.models.length > 0
+                    ? '<small>' + row.models.map(m => escapeHtml(m)).join(', ') + '</small>'
+                    : '<small style="color:#64748b;">\u2014</small>';
+                return `<tr>
+                    <td><strong>${escapeHtml(row.hostname)}</strong><br><small style="color:#64748b;">${escapeHtml(row.url || '')}</small></td>
+                    <td>${backendBadge}${backendVer}</td>
+                    <td>${escapeHtml(row.gpuName)}</td>
+                    <td>${escapeHtml(row.vramGB)}</td>
+                    <td>\u2014</td>
+                    <td>${statusDot} ${escapeHtml(row.status)}</td>
+                    <td>${modelsHtml}</td>
+                    <td>\u2014</td>
+                    <td>\u2014</td>
+                    <td><small style="color:#475569;">—</small></td>
+                </tr>`;
+            }).join('');
+
+            const nodeHtml = fleetNodes.map(node => {
                 const statusClass = (node.status === 'healthy' || node.status === 'online') ? 'status-healthy' :
                                    node.status === 'degraded' ? 'status-degraded' :
                                    (node.status === 'disabled' || node.status === 'offline') ? 'status-disabled' : 'status-unreachable';
@@ -2283,13 +2372,6 @@ Content-Type: application/json
                 const btClass = bt === 'llama-server' ? 'llama-server' : bt === 'ollama' ? 'ollama' : 'unknown';
                 const btLabel = bt === 'llama-server' ? 'llama-server' : 'Ollama';
                 const backendBadge = `<span class="badge-backend ${btClass}">${btLabel}</span>`;
-
-                // Source badge: 'agent' rows come from herd agent heartbeats
-                // (live state in the gateway registry); enrolled rows from herd-tune.
-                const agentVer = node.agent_version ? ' v' + node.agent_version : '';
-                const sourceBadge = node.source === 'agent'
-                    ? ` <span class="badge-backend agent" title="Registered via herd agent heartbeat${escapeHtml(agentVer)}">agent</span>`
-                    : '';
                 const backendVer = node.backend_version ? `<br><small style="color:#64748b;">${escapeHtml(node.backend_version)}</small>` : '';
 
                 // GPU info
@@ -2330,7 +2412,7 @@ Content-Type: application/json
                 }
 
                 return `<tr class="${!node.enabled ? 'row-disabled' : ''}">
-                    <td><strong>${escapeHtml(node.hostname || '')}</strong>${sourceBadge}<br><small style="color:#64748b;">${escapeHtml(node.ollama_url || node.backend_url || '')}</small></td>
+                    <td><strong>${escapeHtml(node.hostname || '')}</strong><br><small style="color:#64748b;">${escapeHtml(node.ollama_url || node.backend_url || '')}</small></td>
                     <td>${backendBadge}${backendVer}</td>
                     <td>${gpuInfoHtml}</td>
                     <td>${vramGB}</td>
@@ -2350,6 +2432,8 @@ Content-Type: application/json
                     </td>
                 </tr>`;
             }).join('');
+
+            tbody.innerHTML = staticHtml + nodeHtml;
         }
 
         async function toggleNodeEnabled(id, enabled) {
@@ -2811,15 +2895,20 @@ Content-Type: application/json
         // Restore API key
         const savedKey = getApiKey();
         if (savedKey) document.getElementById('api-key-input').value = savedKey;
+        initSelfEnrollCmd();
         refresh();
         updateAnalytics();
         checkUpdate();
         refreshSessions();
-        fetchFleetNodes(); // initial badge count
         startCountdown();
 
-        // If fleet tab was last active, start its auto-refresh
-        if (savedTab === 'fleet') startFleetRefresh();
+        // Nodes (fleet) is the default tab — start its auto-refresh unless the user
+        // had a different tab saved from a previous session.
+        if (!savedTab || savedTab === 'fleet') {
+            startFleetRefresh();
+        } else {
+            fetchFleetNodes(); // populate badge count even when another tab is active
+        }
 
         setInterval(refresh, 5000);
         setInterval(updateAnalytics, 30000);
