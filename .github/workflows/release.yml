@@ -45,6 +45,12 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      # herd-tray is a separate workspace member (not built by the default
+      # `cargo build` above); build it so the Windows zip can bundle it.
+      - name: Build tray (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: cargo build --release -p herd-tray --target ${{ matrix.target }}
+
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
         run: |
@@ -56,7 +62,7 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/herd.exe" -DestinationPath "herd-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/herd.exe", "target/${{ matrix.target }}/release/herd-tray.exe" -DestinationPath "herd-${{ github.ref_name }}-${{ matrix.target }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
