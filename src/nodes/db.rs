@@ -1,9 +1,19 @@
 use super::registry::AgentCapabilities;
 use super::types::*;
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+
+/// A single row of the GUI config overlay (gui-tray-spec D3): a scoped,
+/// JSON-encoded value that overrides YAML config at load/reload time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigOverride {
+    pub scope: String,
+    pub key: String,
+    pub value_json: String,
+    pub updated_at: String,
+}
 
 /// Status of a model file download.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,6 +95,78 @@ impl NodeDb {
         };
         db.migrate()?;
         Ok(db)
+    }
+
+    // ── config_overrides CRUD (GUI config overlay, D3) ───────────────────────
+
+    /// Upsert a config override `(scope, key) -> value_json`.
+    pub fn set_override(&self, scope: &str, key: &str, value_json: &str) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO config_overrides (scope, key, value_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(scope, key) DO UPDATE SET value_json = ?3, updated_at = ?4;",
+            rusqlite::params![scope, key, value_json, now],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch a single override's `value_json`, or `None` if absent.
+    pub fn get_override(&self, scope: &str, key: &str) -> Result<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let value = conn
+            .query_row(
+                "SELECT value_json FROM config_overrides WHERE scope = ?1 AND key = ?2;",
+                rusqlite::params![scope, key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
+    /// Delete a single override. Returns `true` if a row was removed.
+    pub fn delete_override(&self, scope: &str, key: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let removed = conn.execute(
+            "DELETE FROM config_overrides WHERE scope = ?1 AND key = ?2;",
+            rusqlite::params![scope, key],
+        )?;
+        Ok(removed > 0)
+    }
+
+    /// List all overrides in a deterministic `(scope, key)` order so the overlay
+    /// merge is reproducible.
+    pub fn list_overrides(&self) -> Result<Vec<ConfigOverride>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("DB lock: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT scope, key, value_json, updated_at FROM config_overrides ORDER BY scope, key;",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ConfigOverride {
+                scope: row.get(0)?,
+                key: row.get(1)?,
+                value_json: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     fn migrate(&self) -> Result<()> {
@@ -179,6 +261,18 @@ impl NodeDb {
             .ok();
         conn.execute_batch("ALTER TABLE nodes ADD COLUMN agent_version TEXT;")
             .ok();
+
+        // Migration v6: GUI config-overlay store (gui-tray-spec D3). Generic
+        // (scope, key) -> JSON value so future GUI settings need no migration.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS config_overrides (
+                scope      TEXT NOT NULL,
+                key        TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (scope, key)
+            );",
+        )?;
 
         Ok(())
     }
@@ -803,6 +897,66 @@ mod tests {
 
     fn test_db() -> NodeDb {
         NodeDb::open_in_memory().unwrap()
+    }
+
+    // ── config_overrides CRUD (D3) ───────────────────────────────────────────
+
+    #[test]
+    fn config_override_round_trip() {
+        let db = test_db();
+        assert!(db.list_overrides().unwrap().is_empty());
+
+        db.set_override("backend:local", "models_enabled", r#"["a"]"#)
+            .unwrap();
+        assert_eq!(
+            db.get_override("backend:local", "models_enabled")
+                .unwrap()
+                .as_deref(),
+            Some(r#"["a"]"#)
+        );
+
+        // Upsert overwrites value, does not duplicate the row.
+        db.set_override("backend:local", "models_enabled", r#"["a","b"]"#)
+            .unwrap();
+        assert_eq!(
+            db.get_override("backend:local", "models_enabled")
+                .unwrap()
+                .as_deref(),
+            Some(r#"["a","b"]"#)
+        );
+        assert_eq!(db.list_overrides().unwrap().len(), 1);
+
+        // Delete: first removes, second is a no-op (false).
+        assert!(db
+            .delete_override("backend:local", "models_enabled")
+            .unwrap());
+        assert!(db
+            .get_override("backend:local", "models_enabled")
+            .unwrap()
+            .is_none());
+        assert!(!db
+            .delete_override("backend:local", "models_enabled")
+            .unwrap());
+    }
+
+    #[test]
+    fn config_overrides_listed_in_deterministic_order() {
+        let db = test_db();
+        db.set_override("backend:z", "priority", "1").unwrap();
+        db.set_override("backend:a", "enabled", "true").unwrap();
+        db.set_override("backend:a", "priority", "10").unwrap();
+        let l = db.list_overrides().unwrap();
+        // ORDER BY scope, key → (a,enabled), (a,priority), (z,priority)
+        let keys: Vec<(String, String)> =
+            l.iter().map(|o| (o.scope.clone(), o.key.clone())).collect();
+        assert_eq!(
+            keys,
+            vec![
+                ("backend:a".into(), "enabled".into()),
+                ("backend:a".into(), "priority".into()),
+                ("backend:z".into(), "priority".into()),
+            ]
+        );
     }
 
     #[test]

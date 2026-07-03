@@ -135,6 +135,8 @@ pub async fn add_backend(
         max_context_len: None,
         locality: None,
         power_cost: None,
+        models_enabled: None,
+        enabled: true,
     };
 
     state.pool.add(backend).await;
@@ -442,4 +444,268 @@ pub async fn update_config(
 
     tracing::info!("Config updated via dashboard: {}", msg);
     Ok(Json(serde_json::json!({"status": "ok", "message": msg})))
+}
+
+// ── GUI config overlay endpoints (gui-tray-spec #G2) ─────────────────────────
+
+/// Effective (merged) view of a backend plus its live pool state.
+#[derive(Debug, Serialize)]
+pub struct EffectiveBackend {
+    pub name: String,
+    pub url: String,
+    pub backend: String,
+    pub priority: u32,
+    pub enabled: bool,
+    pub hot_models: Vec<String>,
+    pub model_filter: Option<String>,
+    pub tags: Vec<String>,
+    /// GUI allowlist: `None` = all installed, `Some([])` = none.
+    pub models_enabled: Option<Vec<String>>,
+    /// Models the pool currently reports for this backend (post-filter).
+    pub models_available: Vec<String>,
+    pub healthy: bool,
+}
+
+/// True iff the effective config currently contains a backend named `name`.
+async fn backend_exists(state: &AppState, name: &str) -> bool {
+    state
+        .config
+        .read()
+        .await
+        .backends
+        .iter()
+        .any(|b| b.name == name)
+}
+
+/// Persist one override, JSON-encoding `value`. Never bails — encode/DB errors warn.
+fn persist_override<T: Serialize>(state: &AppState, scope: &str, key: &str, value: &T) {
+    match serde_json::to_string(value) {
+        Ok(json) => {
+            if let Err(e) = state.node_db.set_override(scope, key, &json) {
+                tracing::warn!("config overlay: failed to persist {}/{}: {}", scope, key, e);
+            }
+        }
+        Err(e) => tracing::warn!("config overlay: failed to encode {}/{}: {}", scope, key, e),
+    }
+}
+
+/// Recompute the effective config from the YAML base + current overrides, push it
+/// to the in-memory config and the live pool, and nudge discovery so the routable
+/// model list updates within a tick — no restart. Correctly restores YAML values
+/// when an override is cleared. No config file (CLI-args start) → the override is
+/// still persisted; it takes effect on next start. Never bails.
+async fn remerge_and_apply(state: &AppState) {
+    let Some(path) = state.config_path.clone() else {
+        tracing::warn!(
+            "config overlay: override saved but no config file to re-merge live — restart to apply"
+        );
+        return;
+    };
+    let mut cfg = match crate::config::Config::from_file(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("config overlay: re-merge failed to read config: {}", e);
+            return;
+        }
+    };
+    let rows: Vec<(String, String, String)> = match state.node_db.list_overrides() {
+        Ok(l) => l
+            .into_iter()
+            .map(|o| (o.scope, o.key, o.value_json))
+            .collect(),
+        Err(e) => {
+            tracing::warn!("config overlay: re-merge failed to list overrides: {}", e);
+            return;
+        }
+    };
+    cfg.apply_overrides(&rows);
+
+    // Reconcile the pool: update existing backends' live config, add new ones.
+    for b in &cfg.backends {
+        if state.pool.get(&b.name).await.is_some() {
+            state.pool.update_backend_config(&b.name, b.clone()).await;
+        } else {
+            state.pool.add(b.clone()).await;
+        }
+    }
+
+    // Best-effort immediate re-discovery so model lists reflect new filters now
+    // (the scheduled discovery tick would also catch up).
+    let pool = (*state.pool).clone();
+    let backends = cfg.backends.clone();
+    tokio::spawn(async move {
+        let disc = crate::backend::ModelDiscovery::new(0);
+        for b in &backends {
+            if let Err(e) = disc.discover_models(&pool, b).await {
+                tracing::debug!(
+                    "config overlay: discovery nudge for {} failed: {}",
+                    b.name,
+                    e
+                );
+            }
+        }
+    });
+
+    *state.config.write().await = cfg;
+}
+
+/// GET /admin/config/backends — effective merged configs + live `models_available`.
+pub async fn get_effective_backends(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = state.config.read().await;
+    let mut backends = Vec::with_capacity(config.backends.len());
+    for b in &config.backends {
+        let (models_available, healthy) = match state.pool.get(&b.name).await {
+            Some(st) => (st.models, st.healthy),
+            None => (Vec::new(), false),
+        };
+        backends.push(EffectiveBackend {
+            name: b.name.clone(),
+            url: b.url.clone(),
+            backend: b.backend.to_string(),
+            priority: b.priority,
+            enabled: b.enabled,
+            hot_models: b.hot_models.clone(),
+            model_filter: b.model_filter.clone(),
+            tags: b.tags.clone(),
+            models_enabled: b.models_enabled.clone(),
+            models_available,
+            healthy,
+        });
+    }
+    Json(serde_json::json!({ "backends": backends }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetModelsRequest {
+    /// An array sets the allowlist; JSON `null` (or absent) clears the override.
+    #[serde(default)]
+    pub models_enabled: Option<Vec<String>>,
+}
+
+/// PUT /admin/config/backends/:name/models — set or clear the models_enabled allowlist.
+pub async fn put_backend_models(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<SetModelsRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !backend_exists(&state, &name).await {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let scope = format!("backend:{name}");
+    match &req.models_enabled {
+        Some(list) => persist_override(&state, &scope, "models_enabled", list),
+        None => {
+            // JSON null / absent → delete the override (restore YAML behavior).
+            if let Err(e) = state.node_db.delete_override(&scope, "models_enabled") {
+                tracing::warn!(
+                    "config overlay: failed to clear models_enabled for {}: {}",
+                    name,
+                    e
+                );
+            }
+        }
+    }
+    remerge_and_apply(&state).await;
+    Ok(Json(serde_json::json!({ "ok": true, "backend": name })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatchBackendRequest {
+    #[serde(default)]
+    pub priority: Option<u32>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub hot_models: Option<Vec<String>>,
+}
+
+/// PUT /admin/config/backends/:name — patch priority / enabled / hot_models.
+pub async fn patch_backend(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<PatchBackendRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !backend_exists(&state, &name).await {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let scope = format!("backend:{name}");
+    if let Some(p) = req.priority {
+        persist_override(&state, &scope, "priority", &p);
+    }
+    if let Some(e) = req.enabled {
+        persist_override(&state, &scope, "enabled", &e);
+    }
+    if let Some(ref h) = req.hot_models {
+        persist_override(&state, &scope, "hot_models", h);
+    }
+    remerge_and_apply(&state).await;
+    Ok(Json(serde_json::json!({ "ok": true, "backend": name })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOverlayBackendRequest {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub backend: BackendType,
+    #[serde(default = "default_priority")]
+    pub priority: u32,
+}
+
+/// POST /admin/config/backends — create an overlay-defined backend (detect flow).
+pub async fn create_overlay_backend(
+    State(state): State<AppState>,
+    Json(req): Json<CreateOverlayBackendRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if backend_exists(&state, &req.name).await {
+        return Err(StatusCode::CONFLICT);
+    }
+    let backend = Backend {
+        name: req.name.clone(),
+        url: req.url,
+        backend: req.backend,
+        priority: req.priority,
+        ..Default::default()
+    };
+    persist_override(
+        &state,
+        &format!("backend:{}", req.name),
+        "definition",
+        &backend,
+    );
+    remerge_and_apply(&state).await;
+    Ok(Json(serde_json::json!({ "ok": true, "backend": req.name })))
+}
+
+/// GET /admin/config/overrides — dump the raw overlay (D3 inspectability).
+pub async fn get_overrides(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.node_db.list_overrides() {
+        Ok(list) => Ok(Json(serde_json::json!({ "overrides": list }))),
+        Err(e) => {
+            tracing::warn!("config overlay: failed to list overrides: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// DELETE /admin/config/overrides/:scope/:key — remove one override, restoring YAML.
+pub async fn delete_override_handler(
+    State(state): State<AppState>,
+    Path((scope, key)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.node_db.delete_override(&scope, &key) {
+        Ok(true) => {
+            remerge_and_apply(&state).await;
+            Ok(Json(
+                serde_json::json!({ "ok": true, "removed": format!("{scope}/{key}") }),
+            ))
+        }
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::warn!("config overlay: failed to delete {}/{}: {}", scope, key, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }

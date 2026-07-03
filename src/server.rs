@@ -202,6 +202,22 @@ impl AppState {
         let mut new_config = Config::from_file(path)?;
         new_config.validate()?;
 
+        // Re-apply the GUI config overlay (D3) on top of the freshly parsed YAML,
+        // so a hot-reload preserves GUI-managed overrides. Never bails.
+        match self.node_db.list_overrides() {
+            Ok(overrides) => {
+                let rows: Vec<(String, String, String)> = overrides
+                    .into_iter()
+                    .map(|o| (o.scope, o.key, o.value_json))
+                    .collect();
+                new_config.apply_overrides(&rows);
+            }
+            Err(e) => tracing::warn!(
+                "config overlay: failed to load overrides on reload — using YAML config as-is: {}",
+                e
+            ),
+        }
+
         // Detect settings that changed but require a restart to take effect
         let mut restart_warnings: Vec<String> = Vec::new();
         {
@@ -357,6 +373,25 @@ impl Server {
         let data_dir = self.config.resolved_data_dir();
         std::fs::create_dir_all(&data_dir)?;
 
+        // Open the node DB early: it holds the GUI config overlay (gui-tray-spec
+        // D3), which we merge onto the parsed YAML config BEFORE building the pool
+        // so the routable set reflects overrides from the first tick. Never bails
+        // — if listing fails we warn and proceed with the YAML config unchanged.
+        let node_db = Arc::new(crate::nodes::NodeDb::open(&data_dir)?);
+        match node_db.list_overrides() {
+            Ok(overrides) => {
+                let rows: Vec<(String, String, String)> = overrides
+                    .into_iter()
+                    .map(|o| (o.scope, o.key, o.value_json))
+                    .collect();
+                self.config.apply_overrides(&rows);
+            }
+            Err(e) => tracing::warn!(
+                "config overlay: failed to load overrides — using YAML config as-is: {}",
+                e
+            ),
+        }
+
         // Create backend pool with circuit breaker config
         let pool = BackendPool::new(
             self.config.backends.clone(),
@@ -467,7 +502,7 @@ impl Server {
             self.config.server.enrollment_key = Some(key);
         }
 
-        let node_db = Arc::new(crate::nodes::NodeDb::open(&data_dir)?);
+        // `node_db` was opened earlier (before the pool) to apply the config overlay.
         let cost_db = Arc::new(crate::providers::cost_db::CostDb::new(
             rusqlite::Connection::open(data_dir.join("frontier_costs.db"))?,
         ));
@@ -821,6 +856,28 @@ impl Server {
             .route(
                 "/admin/config",
                 axum::routing::get(admin::get_config).put(admin::update_config),
+            )
+            // GUI config overlay (gui-tray-spec #G2)
+            .route(
+                "/admin/config/backends",
+                axum::routing::get(admin::get_effective_backends)
+                    .post(admin::create_overlay_backend),
+            )
+            .route(
+                "/admin/config/backends/:name",
+                axum::routing::put(admin::patch_backend),
+            )
+            .route(
+                "/admin/config/backends/:name/models",
+                axum::routing::put(admin::put_backend_models),
+            )
+            .route(
+                "/admin/config/overrides",
+                axum::routing::get(admin::get_overrides),
+            )
+            .route(
+                "/admin/config/overrides/:scope/:key",
+                axum::routing::delete(admin::delete_override_handler),
             )
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
@@ -2458,6 +2515,244 @@ mod tests {
         assert_eq!(state.pool.all().await, vec![String::from("new")]);
 
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    // ── #G2 GUI config API ────────────────────────────────────────────────
+
+    fn uniq_suffix() -> String {
+        // Atomic counter guarantees uniqueness across parallel tests (a bare
+        // nanosecond timestamp can collide, sharing a temp path → flaky reload).
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        format!(
+            "{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    }
+
+    fn write_temp_yaml(cfg: &Config) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("herd-g2-{}.yaml", uniq_suffix()));
+        std::fs::write(&path, cfg.to_yaml().unwrap()).unwrap();
+        path
+    }
+
+    fn cfg_with_backend(b: Backend) -> Config {
+        Config {
+            server: crate::config::ServerConfig {
+                api_key: Some("k".into()),
+                ..Default::default()
+            },
+            backends: vec![b],
+            ..Default::default()
+        }
+    }
+
+    fn build_test_state(initial: Config, config_path: std::path::PathBuf) -> AppState {
+        let u = uniq_suffix();
+        let pool = Arc::new(BackendPool::new(
+            initial.backends.clone(),
+            initial.circuit_breaker.failure_threshold,
+            parse_duration(&initial.circuit_breaker.recovery_time).unwrap(),
+        ));
+        let routing_stats = Arc::new(RoutingStats::new());
+        let session_affinity = Arc::new(SessionAffinity::new());
+        let router = create_router(
+            initial.routing.strategy.clone(),
+            (*pool).clone(),
+            &initial.routing,
+            Arc::clone(&routing_stats),
+            Arc::clone(&session_affinity),
+        );
+        AppState {
+            pool,
+            router: Arc::new(tokio::sync::RwLock::new(router)),
+            client: Arc::new(reqwest::Client::new()),
+            mgmt_client: Arc::new(reqwest::Client::new()),
+            config: Arc::new(tokio::sync::RwLock::new(initial.clone())),
+            analytics: Arc::new(
+                Analytics::new(&std::env::temp_dir().join(format!("herd-g2-an-{u}"))).unwrap(),
+            ),
+            session_store: Arc::new(SessionStore::new(100)),
+            agent_audit: Arc::new(
+                AgentAudit::new(&std::env::temp_dir().join(format!("herd-g2-au-{u}"))).unwrap(),
+            ),
+            metrics: Arc::new(crate::metrics::Metrics::new()),
+            node_db: Arc::new(
+                crate::nodes::NodeDb::open(&std::env::temp_dir().join(format!("herd-g2-db-{u}")))
+                    .unwrap(),
+            ),
+            node_registry: Arc::new(crate::nodes::NodeRegistry::new(Duration::from_secs(30))),
+            binary_store: Arc::new(crate::nodes::BinaryStore::new()),
+            budget: crate::budget::BudgetTracker::new(initial.budget.clone()),
+            rate_limiter: Arc::new(tokio::sync::RwLock::new(
+                crate::rate_limit::RateLimiter::new(&initial.rate_limiting),
+            )),
+            frontier_rate_limiter: Arc::new(tokio::sync::RwLock::new(
+                crate::providers::rate_limit::ProviderRateLimiter::new(&initial.providers),
+            )),
+            auto_cache: Arc::new(crate::classifier_auto::ClassificationCache::new(1000)),
+            cost_db: Arc::new(crate::providers::cost_db::CostDb::new(
+                rusqlite::Connection::open_in_memory().unwrap(),
+            )),
+            routing_timeout_ms: Arc::new(AtomicU64::new(1_000)),
+            routing_retry_count: Arc::new(AtomicU32::new(1)),
+            config_path: Some(config_path),
+            routing_stats,
+            session_affinity,
+        }
+    }
+
+    #[tokio::test]
+    async fn config_api_put_get_models_round_trip() {
+        let cfg = cfg_with_backend(make_backend("local", "http://x:11434", 50));
+        let path = write_temp_yaml(&cfg);
+        let state = build_test_state(cfg, path.clone());
+
+        let before = crate::api::admin::get_effective_backends(axum::extract::State(state.clone()))
+            .await
+            .0;
+        assert!(before["backends"][0]["models_enabled"].is_null());
+
+        let _ = crate::api::admin::put_backend_models(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("local".to_string()),
+            axum::Json(crate::api::admin::SetModelsRequest {
+                models_enabled: Some(vec!["a".into(), "b".into()]),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let after = crate::api::admin::get_effective_backends(axum::extract::State(state.clone()))
+            .await
+            .0;
+        assert_eq!(
+            after["backends"][0]["models_enabled"],
+            serde_json::json!(["a", "b"])
+        );
+        assert!(state
+            .node_db
+            .get_override("backend:local", "models_enabled")
+            .unwrap()
+            .is_some());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn config_api_null_clears_override_restoring_yaml() {
+        let cfg = cfg_with_backend(make_backend("local", "http://x:11434", 50));
+        let path = write_temp_yaml(&cfg);
+        let state = build_test_state(cfg, path.clone());
+
+        let _ = crate::api::admin::put_backend_models(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("local".to_string()),
+            axum::Json(crate::api::admin::SetModelsRequest {
+                models_enabled: Some(vec!["a".into()]),
+            }),
+        )
+        .await
+        .unwrap();
+        // null clears
+        let _ = crate::api::admin::put_backend_models(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("local".to_string()),
+            axum::Json(crate::api::admin::SetModelsRequest {
+                models_enabled: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(state
+            .node_db
+            .get_override("backend:local", "models_enabled")
+            .unwrap()
+            .is_none());
+        let eff = crate::api::admin::get_effective_backends(axum::extract::State(state.clone()))
+            .await
+            .0;
+        assert!(
+            eff["backends"][0]["models_enabled"].is_null(),
+            "cleared override restores YAML behavior (None)"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn config_api_unknown_backend_404() {
+        let cfg = cfg_with_backend(make_backend("local", "http://x:11434", 50));
+        let path = write_temp_yaml(&cfg);
+        let state = build_test_state(cfg, path.clone());
+        let r = crate::api::admin::put_backend_models(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("ghost".to_string()),
+            axum::Json(crate::api::admin::SetModelsRequest {
+                models_enabled: Some(vec![]),
+            }),
+        )
+        .await;
+        assert_eq!(r.unwrap_err(), axum::http::StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn config_api_override_survives_reload() {
+        let cfg = cfg_with_backend(make_backend("local", "http://x:11434", 50));
+        let path = write_temp_yaml(&cfg);
+        let state = build_test_state(cfg, path.clone());
+
+        let _ = crate::api::admin::patch_backend(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("local".to_string()),
+            axum::Json(crate::api::admin::PatchBackendRequest {
+                priority: Some(7),
+                enabled: Some(false),
+                hot_models: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // A full reload re-reads YAML then re-applies the overlay.
+        state.reload_config().await.unwrap();
+        let eff = crate::api::admin::get_effective_backends(axum::extract::State(state.clone()))
+            .await
+            .0;
+        assert_eq!(eff["backends"][0]["priority"], 7);
+        assert_eq!(eff["backends"][0]["enabled"], false);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn config_api_requires_api_key() {
+        use tower::ServiceExt; // for oneshot
+        let cfg = cfg_with_backend(make_backend("local", "http://x:11434", 50));
+        let path = write_temp_yaml(&cfg);
+        let state = build_test_state(cfg, path.clone());
+        // Mount the endpoint behind the same guard used in production.
+        let app = axum::Router::new()
+            .route(
+                "/admin/config/backends",
+                axum::routing::get(crate::api::admin::get_effective_backends),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_api_key,
+            ))
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/admin/config/backends")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -65,6 +65,7 @@ pub(crate) fn filter_healthy<'a>(
         .iter()
         .filter(|b| {
             b.healthy
+                && b.config.enabled
                 && !excluded.contains(&b.config.name)
                 && tags.iter().all(|t| b.config.tags.contains(t))
         })
@@ -207,6 +208,17 @@ impl BackendPool {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
             backend.current_model = model;
+        }
+    }
+
+    /// Replace a backend's live config in place (GUI config overlay, #G2). The
+    /// routing gate (`enabled`), scorer (`priority`), warmer (`hot_models`) and
+    /// the next discovery tick (`models_enabled`/`model_filter`) all read this
+    /// config, so a PUT takes effect without a restart. No-op for an unknown name.
+    pub async fn update_backend_config(&self, name: &str, config: Backend) {
+        let mut backends = self.backends.write().await;
+        if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
+            backend.config = config;
         }
     }
 

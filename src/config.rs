@@ -551,6 +551,20 @@ pub struct Backend {
     /// backend (neutral, weight-dropped).
     #[serde(default)]
     pub power_cost: Option<f64>,
+
+    /// GUI-managed allowlist. When `Some`, discovery retains ONLY these models
+    /// (exact-name match on the backend's reported model list). `Some(vec![])` is
+    /// valid and means "expose nothing" (explicit off-switch). Takes precedence
+    /// over `model_filter` when both are set. `None` (the default) = current
+    /// behavior, zero change for existing configs.
+    #[serde(default)]
+    pub models_enabled: Option<Vec<String>>,
+
+    /// Whether this backend participates in routing. `true` (the default) = current
+    /// behavior. Set `false` (via the GUI config overlay) to keep the backend
+    /// visible/toggleable while excluding it from the routing gate.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 impl Backend {
@@ -580,6 +594,8 @@ impl Default for Backend {
             max_context_len: None,
             locality: None,
             power_cost: None,
+            models_enabled: None,
+            enabled: true,
         }
     }
 }
@@ -1243,6 +1259,98 @@ impl Config {
         Ok(config)
     }
 
+    /// Apply GUI config-overlay rows onto the parsed config (D3). Each row is
+    /// `(scope, key, value_json)`; the overlay (DB) wins over YAML for field
+    /// overrides. Scope `backend:{name}` with key `models_enabled`/`hot_models`/
+    /// `priority`/`enabled` patches that backend's field; key `definition` (full
+    /// Backend JSON) appends a GUI-created backend AFTER the YAML backends — a
+    /// name collision keeps the YAML backend and warns. Never bails: a malformed
+    /// row or unknown target is warned and skipped (config-error rule).
+    ///
+    /// Pure over the override slice (no DB dependency) so the merge is unit-
+    /// testable and deterministic given a stable row order.
+    pub fn apply_overrides(&mut self, overrides: &[(String, String, String)]) {
+        for (scope, key, value_json) in overrides {
+            let Some(name) = scope.strip_prefix("backend:") else {
+                // Non-backend scopes (e.g. future "routing") are not part of the
+                // v1.4 field merge — ignore silently.
+                continue;
+            };
+
+            if key == "definition" {
+                match serde_json::from_str::<Backend>(value_json) {
+                    Ok(b) => {
+                        if self.backends.iter().any(|e| e.name == b.name) {
+                            tracing::warn!(
+                                "config overlay defines backend '{}' but a YAML backend with that name exists — keeping YAML, ignoring overlay",
+                                b.name
+                            );
+                        } else {
+                            self.backends.push(b);
+                        }
+                    }
+                    Err(e) => tracing::warn!(
+                        "config overlay: invalid backend definition for '{}' — ignored: {}",
+                        name,
+                        e
+                    ),
+                }
+                continue;
+            }
+
+            let Some(backend) = self.backends.iter_mut().find(|b| b.name == name) else {
+                tracing::warn!(
+                    "config overlay: override for unknown backend '{}' (key '{}') — ignored",
+                    name,
+                    key
+                );
+                continue;
+            };
+
+            match key.as_str() {
+                // JSON `null` clears the allowlist (back to YAML/None behavior);
+                // an array sets it. `[]` is a valid "expose nothing".
+                "models_enabled" => match serde_json::from_str::<Option<Vec<String>>>(value_json) {
+                    Ok(v) => backend.models_enabled = v,
+                    Err(e) => tracing::warn!(
+                        "config overlay: invalid models_enabled for '{}' — ignored: {}",
+                        name,
+                        e
+                    ),
+                },
+                "hot_models" => match serde_json::from_str::<Vec<String>>(value_json) {
+                    Ok(v) => backend.hot_models = v,
+                    Err(e) => tracing::warn!(
+                        "config overlay: invalid hot_models for '{}' — ignored: {}",
+                        name,
+                        e
+                    ),
+                },
+                "priority" => match serde_json::from_str::<u32>(value_json) {
+                    Ok(v) => backend.priority = v,
+                    Err(e) => tracing::warn!(
+                        "config overlay: invalid priority for '{}' — ignored: {}",
+                        name,
+                        e
+                    ),
+                },
+                "enabled" => match serde_json::from_str::<bool>(value_json) {
+                    Ok(v) => backend.enabled = v,
+                    Err(e) => tracing::warn!(
+                        "config overlay: invalid enabled for '{}' — ignored: {}",
+                        name,
+                        e
+                    ),
+                },
+                other => tracing::warn!(
+                    "config overlay: unknown key '{}' for backend '{}' — ignored",
+                    other,
+                    name
+                ),
+            }
+        }
+    }
+
     fn warn_deprecated_keys(value: &serde_yaml::Value, path: &[String]) {
         if let serde_yaml::Value::Mapping(map) = value {
             for (k, v) in map {
@@ -1421,6 +1529,119 @@ mod tests {
     use super::BackendType;
     use super::Config;
     use std::time::Duration;
+
+    // ── D3 config overlay: Config::apply_overrides ───────────────────────────
+
+    fn one_backend(name: &str) -> Config {
+        serde_yaml::from_str(&format!(
+            "backends:\n  - name: {name}\n    url: http://{name}\n    priority: 50\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn apply_overrides_empty_is_no_change() {
+        let mut cfg = one_backend("a");
+        cfg.apply_overrides(&[]);
+        assert_eq!(cfg.backends.len(), 1);
+        assert_eq!(cfg.backends[0].models_enabled, None);
+        assert!(cfg.backends[0].enabled);
+        assert_eq!(cfg.backends[0].priority, 50);
+    }
+
+    #[test]
+    fn apply_overrides_patches_all_field_keys() {
+        let mut cfg = one_backend("local");
+        cfg.apply_overrides(&[
+            (
+                "backend:local".into(),
+                "models_enabled".into(),
+                r#"["a","b"]"#.into(),
+            ),
+            ("backend:local".into(), "priority".into(), "99".into()),
+            ("backend:local".into(), "enabled".into(), "false".into()),
+            (
+                "backend:local".into(),
+                "hot_models".into(),
+                r#"["a"]"#.into(),
+            ),
+        ]);
+        let b = &cfg.backends[0];
+        assert_eq!(
+            b.models_enabled.as_deref(),
+            Some(&["a".to_string(), "b".to_string()][..])
+        );
+        assert_eq!(b.priority, 99);
+        assert!(!b.enabled);
+        assert_eq!(b.hot_models, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn apply_overrides_models_enabled_null_clears() {
+        let mut cfg: Config = serde_yaml::from_str(
+            "backends:\n  - name: local\n    url: http://x\n    priority: 50\n    models_enabled: [\"x\"]\n",
+        )
+        .unwrap();
+        assert!(cfg.backends[0].models_enabled.is_some());
+        cfg.apply_overrides(&[(
+            "backend:local".into(),
+            "models_enabled".into(),
+            "null".into(),
+        )]);
+        assert_eq!(cfg.backends[0].models_enabled, None);
+    }
+
+    #[test]
+    fn apply_overrides_definition_appends_and_collision_keeps_yaml() {
+        let mut cfg = one_backend("yaml-be");
+        let new_def = r#"{"name":"gui-be","url":"http://gui","priority":10}"#;
+        let collision = r#"{"name":"yaml-be","url":"http://EVIL","priority":1}"#;
+        cfg.apply_overrides(&[
+            ("backend:gui-be".into(), "definition".into(), new_def.into()),
+            (
+                "backend:yaml-be".into(),
+                "definition".into(),
+                collision.into(),
+            ),
+        ]);
+        // gui-be appended; collision on yaml-be ignored (YAML wins).
+        assert_eq!(cfg.backends.len(), 2);
+        let yaml_be = cfg.backends.iter().find(|b| b.name == "yaml-be").unwrap();
+        assert_eq!(
+            yaml_be.url, "http://yaml-be",
+            "YAML backend must win the name collision"
+        );
+        assert!(cfg.backends.iter().any(|b| b.name == "gui-be"));
+    }
+
+    #[test]
+    fn apply_overrides_unknown_backend_and_bad_json_are_skipped_not_panic() {
+        let mut cfg = one_backend("a");
+        cfg.apply_overrides(&[
+            ("backend:ghost".into(), "priority".into(), "5".into()), // unknown backend
+            ("backend:a".into(), "priority".into(), "not-a-number".into()), // bad JSON
+            ("routing".into(), "model_map".into(), "{}".into()),     // non-backend scope
+        ]);
+        assert_eq!(cfg.backends.len(), 1);
+        assert_eq!(
+            cfg.backends[0].priority, 50,
+            "bad priority JSON left the field untouched"
+        );
+    }
+
+    #[test]
+    fn apply_overrides_is_deterministic() {
+        let ov = vec![
+            ("backend:a".into(), "priority".into(), "10".into()),
+            ("backend:a".into(), "enabled".into(), "false".into()),
+        ];
+        let mut c1 = one_backend("a");
+        let mut c2 = c1.clone();
+        c1.apply_overrides(&ov);
+        c2.apply_overrides(&ov);
+        assert_eq!(c1.backends[0].priority, c2.backends[0].priority);
+        assert_eq!(c1.backends[0].enabled, c2.backends[0].enabled);
+    }
 
     #[test]
     fn parse_duration_seconds() {

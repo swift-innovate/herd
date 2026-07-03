@@ -893,6 +893,12 @@ Content-Type: application/json
                             <tr class="admin-row"><td>List backends</td><td>GET</td><td><code>/admin/backends</code></td><td>Yes</td></tr>
                             <tr class="admin-row"><td>Add backend</td><td>POST</td><td><code>/admin/backends</code></td><td>Yes</td></tr>
                             <tr class="admin-row"><td>Reload config</td><td>POST</td><td><code>/admin/reload</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Effective backend configs (+ models)</td><td>GET</td><td><code>/admin/config/backends</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Create overlay backend</td><td>POST</td><td><code>/admin/config/backends</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Patch backend (priority/enabled/hot_models)</td><td>PUT</td><td><code>/admin/config/backends/{name}</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Set models allowlist (null clears)</td><td>PUT</td><td><code>/admin/config/backends/{name}/models</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>List config overrides</td><td>GET</td><td><code>/admin/config/overrides</code></td><td>Yes</td></tr>
+                            <tr class="admin-row"><td>Delete one override</td><td>DELETE</td><td><code>/admin/config/overrides/{scope}/{key}</code></td><td>Yes</td></tr>
                             <tr class="admin-row"><td>Self-update</td><td>POST</td><td><code>/admin/update</code></td><td>Yes</td></tr>
                             <tr class="admin-row"><td>Agent heartbeat (herd agent daemons only)</td><td>POST</td><td><code>/api/internal/nodes/heartbeat</code></td><td>Yes</td></tr>
                             <tr class="admin-row"><td>Agent binary download (herd agent self-update)</td><td>GET</td><td><code>/api/internal/nodes/binary/{version}/{os}-{arch}</code></td><td>Yes</td></tr>
