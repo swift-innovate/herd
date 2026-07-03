@@ -43,3 +43,11 @@ mdns = []  # placeholder — requires mdns-sd crate when implemented
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+# The repo root is both the `herd` package AND the workspace root. Because this is
+# a NON-virtual workspace (root has `[package]`), `cargo build`/`test`/`clippy` at
+# the root operate on `herd` only — the main crate's build output is unchanged and
+# CI (which does not pass `--workspace`) never compiles the GTK-dependent tray on
+# ubuntu/macOS. `herd-tray` builds explicitly via `-p herd-tray` / `--workspace`.
+[workspace]
+members = [".", "herd-tray"]
