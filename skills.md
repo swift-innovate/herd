@@ -277,6 +277,30 @@ or
 Authorization: Bearer your-secret-key
 ```
 
+## Config Overlay (Admin)
+
+GUI-managed config lives in a SQLite overlay on top of `herd.yaml` (YAML stays the
+hand-edited base; the overlay wins on conflict and survives restarts). All require the
+admin API key. A per-backend `models_enabled` allowlist fixes model sprawl — Herd routes
+only to the listed models (`[]` = expose none, absent = all installed).
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/admin/config/backends` | Effective (merged) backend configs + live `models_available` + `models_enabled` |
+| PUT | `/admin/config/backends/{name}/models` | Body `{"models_enabled": ["a","b"]}` sets the allowlist; `{"models_enabled": null}` clears it |
+| PUT | `/admin/config/backends/{name}` | Patch `priority` / `enabled` / `hot_models` |
+| POST | `/admin/config/backends` | Create an overlay-defined backend (`{"name","url","backend","priority"}`) |
+| GET | `/admin/config/overrides` | Inspect the raw overlay |
+| DELETE | `/admin/config/overrides/{scope}/{key}` | Remove one override (restores YAML behavior) |
+
+Changes take effect within one discovery tick — no restart. Example (limit CITADEL to two models):
+
+```
+curl -X PUT http://gateway:40114/admin/config/backends/citadel/models \
+  -H "X-API-Key: your-secret-key" -H "Content-Type: application/json" \
+  -d '{"models_enabled": ["qwen3-coder:30b", "llama3.1:8b"]}'
+```
+
 ## Routing Strategies
 
 Herd supports four strategies. You don't choose the strategy per-request — it's configured

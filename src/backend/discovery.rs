@@ -193,7 +193,9 @@ impl ModelDiscovery {
         info!("Model discovery complete");
     }
 
-    async fn discover_models(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
+    /// Re-probe a single backend and update the pool's model list (applies the
+    /// D2 filter). Public so the config API can nudge a refresh after a PUT.
+    pub async fn discover_models(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
         let model_names: Vec<String> = match backend.backend {
             crate::config::BackendType::LlamaServer | crate::config::BackendType::OpenAICompat => {
                 let url = format!("{}/v1/models", backend.url);
