@@ -65,6 +65,7 @@ pub(crate) fn filter_healthy<'a>(
         .iter()
         .filter(|b| {
             b.healthy
+                && b.config.enabled
                 && !excluded.contains(&b.config.name)
                 && tags.iter().all(|t| b.config.tags.contains(t))
         })

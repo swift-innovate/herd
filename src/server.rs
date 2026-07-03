@@ -202,6 +202,22 @@ impl AppState {
         let mut new_config = Config::from_file(path)?;
         new_config.validate()?;
 
+        // Re-apply the GUI config overlay (D3) on top of the freshly parsed YAML,
+        // so a hot-reload preserves GUI-managed overrides. Never bails.
+        match self.node_db.list_overrides() {
+            Ok(overrides) => {
+                let rows: Vec<(String, String, String)> = overrides
+                    .into_iter()
+                    .map(|o| (o.scope, o.key, o.value_json))
+                    .collect();
+                new_config.apply_overrides(&rows);
+            }
+            Err(e) => tracing::warn!(
+                "config overlay: failed to load overrides on reload — using YAML config as-is: {}",
+                e
+            ),
+        }
+
         // Detect settings that changed but require a restart to take effect
         let mut restart_warnings: Vec<String> = Vec::new();
         {
@@ -357,6 +373,25 @@ impl Server {
         let data_dir = self.config.resolved_data_dir();
         std::fs::create_dir_all(&data_dir)?;
 
+        // Open the node DB early: it holds the GUI config overlay (gui-tray-spec
+        // D3), which we merge onto the parsed YAML config BEFORE building the pool
+        // so the routable set reflects overrides from the first tick. Never bails
+        // — if listing fails we warn and proceed with the YAML config unchanged.
+        let node_db = Arc::new(crate::nodes::NodeDb::open(&data_dir)?);
+        match node_db.list_overrides() {
+            Ok(overrides) => {
+                let rows: Vec<(String, String, String)> = overrides
+                    .into_iter()
+                    .map(|o| (o.scope, o.key, o.value_json))
+                    .collect();
+                self.config.apply_overrides(&rows);
+            }
+            Err(e) => tracing::warn!(
+                "config overlay: failed to load overrides — using YAML config as-is: {}",
+                e
+            ),
+        }
+
         // Create backend pool with circuit breaker config
         let pool = BackendPool::new(
             self.config.backends.clone(),
@@ -467,7 +502,7 @@ impl Server {
             self.config.server.enrollment_key = Some(key);
         }
 
-        let node_db = Arc::new(crate::nodes::NodeDb::open(&data_dir)?);
+        // `node_db` was opened earlier (before the pool) to apply the config overlay.
         let cost_db = Arc::new(crate::providers::cost_db::CostDb::new(
             rusqlite::Connection::open(data_dir.join("frontier_costs.db"))?,
         ));

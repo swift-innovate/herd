@@ -135,6 +135,8 @@ pub async fn add_backend(
         max_context_len: None,
         locality: None,
         power_cost: None,
+        models_enabled: None,
+        enabled: true,
     };
 
     state.pool.add(backend).await;
