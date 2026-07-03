@@ -250,6 +250,36 @@ curl http://localhost:40114/v1/models       # → available models across all ba
 
 You're now routing through Herd. Point any OpenAI-compatible client at `http://localhost:40114`.
 
+## Tray App (`herd-tray`)
+
+`herd-tray` is a Windows-first system-tray companion that shows gateway health at a
+glance and launches the gateway when it isn't already running. It's a separate
+workspace member — building the main `herd` binary does **not** build it.
+
+```bash
+# Build (Windows; the tray links native GUI libraries)
+cargo build --release -p herd-tray
+
+# Run — attaches to a running gateway, or spawns `herd serve` if none is found
+./target/release/herd-tray
+
+# Point it at a non-default gateway (flag wins over env wins over the default)
+./target/release/herd-tray --gateway http://192.168.1.10:40114
+HERD_TRAY_GATEWAY=http://192.168.1.10:40114 ./target/release/herd-tray
+```
+
+- **Icon:** gray until the first poll · green = ≥1 healthy backend · amber = gateway
+  up but 0 healthy · red = unreachable (or a supervised gateway that has exited).
+  Polls `/status` every 5s.
+- **Menu:** Open Dashboard · Models… (→ `/#settings`) · Start/Stop gateway (only when
+  the tray started it) · Start at login (Windows `HKCU\…\Run`) · Quit (stops a
+  supervised gateway; leaves an attached one running).
+- **Single instance:** a second launch exits silently (named mutex on Windows).
+- **Config:** `--gateway <url>` (default `http://127.0.0.1:40114`) or `HERD_TRAY_GATEWAY`.
+
+Linux/macOS builds compile (the Windows-only bits — autostart, single-instance,
+exe icon — degrade to no-ops), but the tray is developed and shipped for Windows.
+
 ## Architecture
 
 ```

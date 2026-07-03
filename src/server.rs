@@ -2002,6 +2002,10 @@ async fn status_handler(
     axum::Json(serde_json::json!({
         "healthy_backends": healthy,
         "unhealthy_backends": unhealthy,
+        // Additive scalar counts (extend, not replace) so lightweight clients
+        // (e.g. herd-tray) can read health without parsing the backend arrays.
+        "healthy_backend_count": healthy.len(),
+        "backend_count": healthy.len() + unhealthy.len(),
         "routing_strategy": format!("{:?}", config.routing.strategy),
     }))
 }
