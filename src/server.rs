@@ -2374,8 +2374,14 @@ async fn skills_handler(
     }))
 }
 
-async fn dashboard_handler() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("../dashboard.html"))
+async fn dashboard_handler() -> impl axum::response::IntoResponse {
+    // `no-cache` forces the browser to revalidate on every load; without a
+    // validator that means always re-fetch, so a new gateway build's dashboard
+    // shows up immediately instead of serving a stale cached copy.
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-cache")],
+        axum::response::Html(include_str!("../dashboard.html")),
+    )
 }
 
 async fn skills_md_handler() -> (

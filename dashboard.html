@@ -616,6 +616,26 @@
         }
         .data-table tr:last-child td { border-bottom: none; }
         .data-table td.empty-state { text-align: center; padding: 40px; color: #64748b; }
+
+        /* Model Routing cards (D5 / #G3) */
+        .mr-card { border:1px solid #334155; border-radius:8px; padding:16px; margin-bottom:14px; background:#0f172a; }
+        .mr-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+        .mr-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+        .mr-dot.up { background:#22c55e; }
+        .mr-dot.down { background:#ef4444; }
+        .mr-name { color:#e2e8f0; font-weight:600; }
+        .mr-badge { font-size:11px; padding:2px 7px; border-radius:10px; background:#1e293b; color:#94a3b8; border:1px solid #334155; }
+        .mr-url { color:#64748b; font-size:12px; margin-left:auto; }
+        .mr-controls { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+        .mr-controls input[type=text] { flex:1; min-width:160px; padding:6px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:6px; }
+        .mr-list { max-height:220px; overflow-y:auto; border:1px solid #1e293b; border-radius:6px; padding:6px 8px; }
+        .mr-row { display:flex; align-items:center; gap:8px; padding:3px 2px; color:#cbd5e1; font-size:13px; }
+        .mr-row.missing { color:#64748b; }
+        .mr-miss-badge { font-size:10px; padding:1px 6px; border-radius:8px; background:#7f1d1d; color:#fca5a5; margin-left:auto; }
+        .mr-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; align-items:center; }
+        .mr-note { color:#64748b; font-size:11px; margin-right:auto; }
+        .mr-hot { margin-top:12px; }
+        .mr-hot select { width:100%; margin-top:4px; background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:6px; }
         .status-dot {
             display: inline-block; width: 8px; height: 8px;
             border-radius: 50%; margin-right: 6px; vertical-align: middle;
@@ -1123,6 +1143,35 @@ Content-Type: application/json
                     No API key is set. Admin endpoints are unprotected. Set one below.
                 </div>
 
+                <!-- Model Routing (D5): per-backend models_enabled allowlist via the config overlay -->
+                <div class="stat-card" id="model-routing-section" style="margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="margin:0; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Model Routing</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="loadModelRouting()">Refresh</button>
+                    </div>
+                    <p style="color:#64748b; font-size:12px; margin:0 0 16px;">
+                        Choose which installed models Herd routes to on each backend. Changes apply within one discovery tick — no restart.
+                    </p>
+                    <div id="model-routing-cards"><div class="empty-state">Loading…</div></div>
+                </div>
+
+                <!-- Config Overrides panel (D3 inspectability) -->
+                <div class="stat-card" style="margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="margin:0; color:#e2e8f0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">Config Overrides</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="loadOverrides()">Refresh</button>
+                    </div>
+                    <p style="color:#64748b; font-size:12px; margin:0 0 16px;">
+                        GUI-managed overrides layered on top of <code>herd.yaml</code> (the overlay wins and survives restarts). Delete a row to restore the YAML value.
+                    </p>
+                    <table class="data-table" id="overrides-table">
+                        <thead>
+                            <tr><th>Scope</th><th>Key</th><th>Value</th><th>Updated</th><th></th></tr>
+                        </thead>
+                        <tbody id="overrides-body"></tbody>
+                    </table>
+                </div>
+
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
                     <!-- Server -->
                     <div class="stat-card">
@@ -1387,15 +1436,25 @@ Content-Type: application/json
             } else {
                 stopFleetRefresh();
             }
-            // Settings tab: load config
+            // Settings tab: load config + model-routing/overlay panels
             if (name === 'settings') {
                 loadConfig();
+                loadModelRouting();
+                loadOverrides();
             }
         }
 
-        // Restore last tab
+        // Restore last tab. A #settings hash (herd-tray's "Models…" deep-link)
+        // takes priority so the tray always lands on the Settings tab.
         const savedTab = sessionStorage.getItem('herd-tab');
-        if (savedTab) switchTab(savedTab);
+        if (location.hash === '#settings') {
+            switchTab('settings');
+        } else if (savedTab) {
+            switchTab(savedTab);
+        }
+        window.addEventListener('hashchange', () => {
+            if (location.hash === '#settings') switchTab('settings');
+        });
 
         // -- Helpers --
         function formatIdle(seconds) {
@@ -1486,6 +1545,18 @@ Content-Type: application/json
 
         function escapeHtml(str) {
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Safe for HTML *attribute* values (double-quoted): also escapes " and '.
+        // Use this — never string-interpolated inline JS — for untrusted values
+        // (backend names, override scopes/keys are admin-controllable).
+        function attrEscape(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function getApiKey() {
@@ -2862,6 +2933,171 @@ Content-Type: application/json
                 const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
                 showToast(err.error || 'Save failed', 'error');
             }
+        }
+
+        // -- Model Routing (D5 / #G3): per-backend models_enabled allowlist --
+        // Backed by the #G2 config-overlay API; changes apply within one discovery
+        // tick with no restart. `mrBackends` is `var` (not `let`) so an early
+        // switchTab('settings') from a saved tab / #settings hash can't hit a TDZ.
+        var mrBackends = {};
+
+        // Sanitize a backend name into a DOM-id-safe token (names may contain ':').
+        function cssId(name) { return name.replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+        async function loadModelRouting() {
+            const container = document.getElementById('model-routing-cards');
+            if (!container) return;
+            let resp;
+            try { resp = await authFetch('/admin/config/backends'); }
+            catch (e) { container.innerHTML = '<div class="empty-state">Gateway unreachable.</div>'; return; }
+            if (resp.status === 401) { container.innerHTML = '<div class="empty-state">API key required — set it above.</div>'; return; }
+            if (!resp.ok) { container.innerHTML = '<div class="empty-state">Failed to load backends.</div>'; return; }
+            const data = await resp.json();
+            const backends = data.backends || [];
+            mrBackends = {};
+            if (!backends.length) { container.innerHTML = '<div class="empty-state">No backends configured.</div>'; return; }
+            container.innerHTML = backends.map(b => { mrBackends[b.name] = b; return renderBackendCard(b); }).join('');
+        }
+
+        function renderBackendCard(b) {
+            const available = b.models_available || [];
+            const enabled = b.models_enabled; // null/undefined => route all installed
+            const allowAll = enabled === null || enabled === undefined;
+            // Union of installed + allowlisted so a checked-but-missing model still shows.
+            const names = Array.from(new Set([...available, ...(Array.isArray(enabled) ? enabled : [])])).sort();
+            const rows = names.map(m => {
+                const installed = available.includes(m);
+                const checked = allowAll ? true : enabled.includes(m);
+                const missing = checked && !installed;
+                return `<label class="mr-row${missing ? ' missing' : ''}">
+                    <input type="checkbox" data-mrmodel value="${attrEscape(m)}" ${checked ? 'checked' : ''}>
+                    <span>${escapeHtml(m)}</span>
+                    ${missing ? '<span class="mr-miss-badge">missing</span>' : ''}
+                </label>`;
+            }).join('') || '<div style="color:#64748b; font-size:12px; padding:6px;">No models reported yet.</div>';
+
+            // Hot-model options come from the currently-enabled set (D5).
+            const enabledSet = allowAll ? available.slice() : names.filter(m => enabled.includes(m));
+            const hot = b.hot_models || [];
+            const hotOpts = enabledSet.map(m => `<option value="${attrEscape(m)}" ${hot.includes(m) ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+
+            const id = cssId(b.name);
+            const note = allowAll
+                ? 'Routing ALL installed models (no allowlist set).'
+                : `${enabled.length} of ${names.length} allowed.`;
+            // The backend name is held in data-backend (a safe HTML-attribute
+            // context) and read by static handlers via dataset.backend — never
+            // interpolated into inline JS, so a name with quotes cannot inject.
+            return `<div class="mr-card" id="mr-card-${id}" data-backend="${attrEscape(b.name)}">
+                <div class="mr-head">
+                    <span class="mr-dot ${b.healthy ? 'up' : 'down'}"></span>
+                    <span class="mr-name">${escapeHtml(b.name)}</span>
+                    <span class="mr-badge">${escapeHtml(b.backend || '')}</span>
+                    <span class="mr-url">${escapeHtml(b.url || '')}</span>
+                </div>
+                <div class="mr-controls">
+                    <input type="text" placeholder="Filter ${names.length} models…" oninput="mrFilter(this.closest('.mr-card').dataset.backend, this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="mrToggleAll(this.closest('.mr-card').dataset.backend, true)">All</button>
+                    <button class="btn btn-secondary btn-sm" onclick="mrToggleAll(this.closest('.mr-card').dataset.backend, false)">None</button>
+                </div>
+                <div class="mr-list" id="mr-list-${id}">${rows}</div>
+                <div class="mr-actions">
+                    <span class="mr-note">${note}</span>
+                    <button class="btn btn-secondary btn-sm" onclick="mrClearAllowlist(this.closest('.mr-card').dataset.backend)">Route all</button>
+                    <button class="btn btn-primary btn-sm" onclick="mrSaveAllowlist(this.closest('.mr-card').dataset.backend)">Save allowlist</button>
+                </div>
+                <div class="mr-hot">
+                    <span style="color:#94a3b8; font-size:12px;">Hot models (kept warm)</span>
+                    <select multiple size="3" id="mr-hot-${id}">${hotOpts}</select>
+                    <div class="mr-actions"><button class="btn btn-secondary btn-sm" onclick="mrSaveHot(this.closest('.mr-card').dataset.backend)">Save hot models</button></div>
+                </div>
+            </div>`;
+        }
+
+        function mrFilter(name, q) {
+            q = (q || '').toLowerCase();
+            const list = document.getElementById('mr-list-' + cssId(name));
+            if (!list) return;
+            list.querySelectorAll('.mr-row').forEach(row => {
+                const m = row.querySelector('input').value.toLowerCase();
+                row.style.display = m.includes(q) ? '' : 'none';
+            });
+        }
+
+        // Toggle only the currently-visible (filtered) rows — matches user intent
+        // when a search is active.
+        function mrToggleAll(name, checked) {
+            const list = document.getElementById('mr-list-' + cssId(name));
+            if (!list) return;
+            list.querySelectorAll('.mr-row').forEach(row => {
+                if (row.style.display !== 'none') row.querySelector('input').checked = checked;
+            });
+        }
+
+        async function mrSaveAllowlist(name) {
+            const list = document.getElementById('mr-list-' + cssId(name));
+            if (!list) return;
+            const models = Array.from(list.querySelectorAll('input[data-mrmodel]:checked')).map(i => i.value);
+            const resp = await authFetch(`/admin/config/backends/${encodeURIComponent(name)}/models`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ models_enabled: models }),
+            });
+            if (resp.ok) { showToast(`Saved allowlist for ${name} (${models.length} models)`); loadModelRouting(); loadOverrides(); }
+            else if (resp.status === 404) { showToast(`Backend ${name} not found`, 'error'); }
+            else { showToast('Save failed', 'error'); }
+        }
+
+        async function mrClearAllowlist(name) {
+            const resp = await authFetch(`/admin/config/backends/${encodeURIComponent(name)}/models`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ models_enabled: null }),
+            });
+            if (resp.ok) { showToast(`${name}: routing all models (allowlist cleared)`); loadModelRouting(); loadOverrides(); }
+            else { showToast('Clear failed', 'error'); }
+        }
+
+        async function mrSaveHot(name) {
+            const sel = document.getElementById('mr-hot-' + cssId(name));
+            if (!sel) return;
+            const hot = Array.from(sel.selectedOptions).map(o => o.value);
+            const resp = await authFetch(`/admin/config/backends/${encodeURIComponent(name)}`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ hot_models: hot }),
+            });
+            if (resp.ok) { showToast(`Saved hot models for ${name} (${hot.length})`); loadOverrides(); }
+            else { showToast('Save failed', 'error'); }
+        }
+
+        async function loadOverrides() {
+            const body = document.getElementById('overrides-body');
+            if (!body) return;
+            let resp;
+            try { resp = await authFetch('/admin/config/overrides'); }
+            catch (e) { body.innerHTML = '<tr><td colspan="5" class="empty-state">Gateway unreachable.</td></tr>'; return; }
+            if (resp.status === 401) { body.innerHTML = '<tr><td colspan="5" class="empty-state">API key required.</td></tr>'; return; }
+            if (!resp.ok) { body.innerHTML = '<tr><td colspan="5" class="empty-state">Failed to load overrides.</td></tr>'; return; }
+            const data = await resp.json();
+            const rows = data.overrides || [];
+            if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="empty-state">No overrides — running pure herd.yaml.</td></tr>'; return; }
+            body.innerHTML = rows.map(o => {
+                let val = o.value_json || '';
+                if (val.length > 80) val = val.slice(0, 80) + '…';
+                const when = (o.updated_at || '').replace('T', ' ').slice(0, 19);
+                return `<tr>
+                    <td>${escapeHtml(o.scope)}</td>
+                    <td>${escapeHtml(o.key)}</td>
+                    <td><code>${escapeHtml(val)}</code></td>
+                    <td>${escapeHtml(when)}</td>
+                    <td><button class="btn btn-secondary btn-sm" onclick="deleteOverride('${escapeHtml(o.scope)}', '${escapeHtml(o.key)}')">Delete</button></td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function deleteOverride(scope, key) {
+            const resp = await authFetch(`/admin/config/overrides/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`, { method: 'DELETE' });
+            if (resp.ok) { showToast(`Removed override ${scope}/${key}`); loadModelRouting(); loadOverrides(); }
+            else if (resp.status === 404) { showToast('Override not found', 'error'); }
+            else { showToast('Delete failed', 'error'); }
         }
 
         // -- Countdown Timer --
