@@ -126,8 +126,11 @@ fn run(gateway: String, mode: Mode, mut supervisor: Supervisor) -> anyhow::Resul
     let autostart_id = autostart_item.id().clone();
     let quit_id = quit_item.id().clone();
 
-    let dashboard_url = gateway.trim_end_matches('/').to_string();
-    let models_url = format!("{}/#settings", dashboard_url);
+    let base = gateway.trim_end_matches('/').to_string();
+    let dashboard_url = format!("{base}/dashboard");
+    // Deep-links to the dashboard's Settings tab (the model picker lands here once
+    // #G3 ships that tab; until then it opens the dashboard).
+    let models_url = format!("{base}/dashboard#settings");
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -138,8 +141,13 @@ fn run(gateway: String, mode: Mode, mut supervisor: Supervisor) -> anyhow::Resul
                 let st = next_state(poll, supervising, alive);
                 if st != current {
                     current = st;
-                    if let Ok(icon) = icons::tray_icon_for(st) {
-                        let _ = tray.set_icon(Some(icon));
+                    match icons::tray_icon_for(st) {
+                        Ok(icon) => {
+                            if let Err(e) = tray.set_icon(Some(icon)) {
+                                eprintln!("[herd-tray] set_icon failed: {e}");
+                            }
+                        }
+                        Err(e) => eprintln!("[herd-tray] icon build failed: {e}"),
                     }
                 }
                 // Reflect gateway liveness in the Start/Stop items.
