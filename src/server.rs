@@ -664,6 +664,9 @@ impl Server {
             .route("/status", axum::routing::get(status_handler))
             // Dashboard
             .route("/dashboard", axum::routing::get(dashboard_handler))
+            // Dashboard v2 (Ember redesign) — behind its own path until Phase 1 hits
+            // parity with /dashboard; see tasks/HERD-DASHBOARD-REDESIGN.md
+            .route("/dashboard2", axum::routing::get(dashboard2_handler))
             // OpenAI-compatible API
             .route("/v1/models", axum::routing::get(openai::list_models))
             .route(
@@ -2381,6 +2384,13 @@ async fn dashboard_handler() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CACHE_CONTROL, "no-cache")],
         axum::response::Html(include_str!("../dashboard.html")),
+    )
+}
+
+async fn dashboard2_handler() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-cache")],
+        axum::response::Html(include_str!(concat!(env!("OUT_DIR"), "/dashboard2.html"))),
     )
 }
 

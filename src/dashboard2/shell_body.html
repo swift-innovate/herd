@@ -1,0 +1,99 @@
+<body>
+<div id="toast-stack"></div>
+<div id="modal-root"></div>
+
+<div id="app">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <img data-herd-mark alt="Herd" width="28" height="28">
+      <div>
+        <div class="sidebar-brand-name">Herd</div>
+        <div class="sidebar-brand-version"><span id="gw-version">v—</span> · <span class="tag" id="gw-strategy">—</span></div>
+      </div>
+    </div>
+
+    <div class="nav-item active" data-view="fleet">Fleet <span class="badge" id="nav-badge-fleet"></span></div>
+    <div class="nav-item" data-view="models">Models</div>
+    <div class="nav-item" data-view="analytics">Analytics</div>
+    <div class="nav-item" data-view="sessions">Sessions <span class="badge" id="nav-badge-sessions"></span></div>
+    <div class="nav-item" data-view="tasks">Tasks <span class="badge amber" id="nav-badge-tasks"></span></div>
+    <div class="nav-item" data-view="settings">Settings</div>
+
+    <div class="sidebar-footer">
+      <div><span id="conn-dot" class="dot-ok">●</span> <span id="conn-label">connecting…</span> · ↻ <span id="refresh-countdown">—</span>s</div>
+      <div class="key-row" id="api-key-row">API key <span id="api-key-mask">not set</span></div>
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- ===== Fleet ===== -->
+    <section id="view-fleet" class="view active">
+      <div class="view-header">
+        <span class="view-title">Fleet</span>
+        <span class="view-summary" id="fleet-summary">loading…</span>
+        <input id="fleet-filter" placeholder="filter…" style="display:none; width:120px;">
+        <div class="view-actions">
+          <button class="btn btn-secondary" id="btn-update-fleet">Update fleet</button>
+          <button class="btn btn-primary" id="btn-add-node">+ Add node</button>
+        </div>
+      </div>
+      <div id="fleet-banner"></div>
+      <div class="card" id="fleet-card">
+        <div id="fleet-table-head" class="table-head" style="grid-template-columns: 150px 100px 200px 64px 52px 1fr 90px 20px;">
+          <span>Node</span><span>Backend</span><span>VRAM ▾</span><span>Util</span><span>Temp</span><span>Models</span><span>Agent</span><span></span>
+        </div>
+        <div id="fleet-rows"></div>
+      </div>
+      <div id="fleet-legend" style="display:flex; gap:14px; margin-top:12px; font-size:11px;">
+        <span class="health-healthy">● healthy</span>
+        <span class="health-degraded">◆ degraded</span>
+        <span class="health-offline">○ offline</span>
+        <span class="health-circuit">⊘ circuit open</span>
+      </div>
+    </section>
+
+    <!-- ===== Node detail ===== -->
+    <section id="view-node" class="view">
+      <div id="node-detail-root"></div>
+    </section>
+
+    <!-- ===== Models ===== -->
+    <section id="view-models" class="view">
+      <div class="view-header"><span class="view-title">Models</span></div>
+      <div class="card" style="padding:40px;">
+        <div class="empty-state">
+          <div class="empty-state-title">Fit-verdict install grid lands in Phase 2</div>
+          <div class="empty-state-sub">Needs the <code>herd fit</code> endpoint and the heartbeat task envelope. HF search UI is stubbed here so the nav isn't a dead end.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Analytics ===== -->
+    <section id="view-analytics" class="view">
+      <div id="analytics-root"></div>
+    </section>
+
+    <!-- ===== Sessions ===== -->
+    <section id="view-sessions" class="view">
+      <div id="sessions-root"></div>
+    </section>
+
+    <!-- ===== Tasks ===== -->
+    <section id="view-tasks" class="view">
+      <div class="view-header"><span class="view-title">Tasks</span></div>
+      <div class="card" style="padding:40px;">
+        <div class="empty-state">
+          <div class="empty-state-title">Tasks pane lands in Phase 2</div>
+          <div class="empty-state-sub">Needs the heartbeat task envelope (install/restart/update as coarse polled states). Nothing to show against today's API.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Settings ===== -->
+    <section id="view-settings" class="view">
+      <div id="settings-root"></div>
+    </section>
+
+  </main>
+</div>
