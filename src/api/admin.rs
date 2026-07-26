@@ -51,6 +51,10 @@ pub struct BackendResponse {
     pub tags: Vec<String>,
     pub healthy: bool,
     pub current_model: Option<String>,
+    /// Models actually loaded and serving right now (residency-signal.md).
+    /// Additive: `current_model` and `model_count` (which counts `models`,
+    /// availability) are unchanged in shape.
+    pub resident_models: Vec<String>,
     pub model_count: usize,
     pub idle_seconds: u64,
     pub gpu: Option<GpuResponse>,
@@ -76,6 +80,7 @@ fn backend_to_response(b: &crate::backend::BackendState) -> BackendResponse {
         tags: b.config.tags.clone(),
         healthy: b.healthy,
         current_model: b.current_model.clone(),
+        resident_models: b.resident_models.clone(),
         model_count: b.models.len(),
         idle_seconds: b.last_request.elapsed().as_secs(),
         gpu: b.gpu_metrics.as_ref().map(|g| GpuResponse {

@@ -2,6 +2,8 @@ use crate::backend::{BackendPool, GpuMetrics};
 use crate::config::Backend;
 use anyhow::Result;
 use serde::Deserialize;
+use std::collections::BTreeSet;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::info;
@@ -116,6 +118,11 @@ pub(crate) fn filter_models(
 pub struct ModelDiscovery {
     client: reqwest::Client,
     interval: Duration,
+    /// Backend names whose resident-model probe (`/api/ps` / `/v1/models`) is
+    /// CURRENTLY in a failed state. Bookkeeping only — never read by routing —
+    /// so `discover_running`'s stale-keep WARN logs once per backend per
+    /// healthy→failed transition instead of once per discovery tick.
+    resident_probe_failed: Mutex<BTreeSet<String>>,
 }
 
 impl ModelDiscovery {
@@ -126,6 +133,26 @@ impl ModelDiscovery {
                 .build()
                 .unwrap(),
             interval: Duration::from_secs(interval_secs),
+            resident_probe_failed: Mutex::new(BTreeSet::new()),
+        }
+    }
+
+    /// Records the outcome of a resident-model probe for `name`. Returns
+    /// `true` exactly on a healthy→failed transition (caller should log a
+    /// WARN); returns `false` on a repeat failure (already logged) or any
+    /// success. Never panics on a poisoned lock — recovers the inner set,
+    /// since a stale bookkeeping set is a logging-cadence nuisance, not a
+    /// correctness issue.
+    fn note_probe_result(&self, name: &str, ok: bool) -> bool {
+        let mut failed = self
+            .resident_probe_failed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if ok {
+            failed.remove(name);
+            false
+        } else {
+            failed.insert(name.to_string())
         }
     }
 
@@ -224,31 +251,65 @@ impl ModelDiscovery {
         Ok(())
     }
 
-    async fn discover_running(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
-        let current = match backend.backend {
-            crate::config::BackendType::LlamaServer | crate::config::BackendType::OpenAICompat => {
-                // llama-server/OpenAI-compat always has its model loaded — use /v1/models
-                let url = format!("{}/v1/models", backend.url);
-                let resp = self.client.get(&url).send().await?;
-                let models: OpenAIModelsResponse = resp.json().await?;
-                models.data.first().map(|m| m.id.clone())
+    /// Re-probe a single backend's LIVE resident-model set (models actually
+    /// loaded and serving right now, not merely on disk) and write the FULL
+    /// list into the pool via `update_resident_models` — Ollama can hold
+    /// several models concurrently, so this reads every `/api/ps` entry
+    /// rather than truncating to `.first()`. Public so tests and the config
+    /// API can drive a single pass deterministically.
+    ///
+    /// Failure policy (residency-signal.md §7): a failed or malformed probe —
+    /// connection refused, a non-2xx status (including a pre-`/api/ps`
+    /// Ollama's 404), or unparseable JSON — leaves `resident_models`
+    /// UNCHANGED. It is never cleared and never falls back to `models`; doing
+    /// either would misreport a transient blip or an old Ollama as "nothing
+    /// resident" or "everything on disk is resident". A WARN is logged once
+    /// per backend per healthy→failed transition (not once per tick); the
+    /// error is still returned so `discover_all`'s existing trace-level log
+    /// and the health checker's independent probe cycle are unaffected.
+    pub async fn discover_running(&self, pool: &BackendPool, backend: &Backend) -> Result<()> {
+        let probe: Result<Vec<String>> = async {
+            match backend.backend {
+                crate::config::BackendType::LlamaServer
+                | crate::config::BackendType::OpenAICompat => {
+                    // llama-server/OpenAI-compat only ever serves what it
+                    // loaded, so /v1/models IS the resident set.
+                    let url = format!("{}/v1/models", backend.url);
+                    let resp = self.client.get(&url).send().await?.error_for_status()?;
+                    let models: OpenAIModelsResponse = resp.json().await?;
+                    Ok(models.data.into_iter().map(|m| m.id).collect())
+                }
+                crate::config::BackendType::Ollama => {
+                    let url = format!("{}/api/ps", backend.url);
+                    let resp = self.client.get(&url).send().await?.error_for_status()?;
+                    let running: OllamaRunning = resp.json().await?;
+                    Ok(running
+                        .models
+                        .into_iter()
+                        .map(|m| if m.model.is_empty() { m.name } else { m.model })
+                        .collect())
+                }
             }
-            crate::config::BackendType::Ollama => {
-                let url = format!("{}/api/ps", backend.url);
-                let resp = self.client.get(&url).send().await?;
-                let running: OllamaRunning = resp.json().await?;
-                running.models.first().map(|m| {
-                    if m.model.is_empty() {
-                        m.name.clone()
-                    } else {
-                        m.model.clone()
-                    }
-                })
-            }
-        };
+        }
+        .await;
 
-        pool.update_current_model(&backend.name, current).await;
-        Ok(())
+        match probe {
+            Ok(models) => {
+                pool.update_resident_models(&backend.name, models).await;
+                self.note_probe_result(&backend.name, true);
+                Ok(())
+            }
+            Err(e) => {
+                if self.note_probe_result(&backend.name, false) {
+                    tracing::warn!(
+                        "Resident-model probe failed for {}: {} — keeping previous resident_models (stale-keep)",
+                        backend.name,
+                        e
+                    );
+                }
+                Err(e)
+            }
+        }
     }
 
     async fn discover_gpu_metrics(&self, pool: &BackendPool, name: &str, url: &str) -> Result<()> {

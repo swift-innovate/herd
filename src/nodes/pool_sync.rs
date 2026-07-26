@@ -80,6 +80,13 @@ impl AgentPoolSync {
                 // changes --ctx-size).
                 st.config.max_context_len = caps.context_len;
                 st.models = caps.models_loaded.clone();
+                // Agent-reported models_loaded is already true residency
+                // (residency-signal.md §3) — including an empty list, which
+                // is a genuine "nothing resident" signal, not an unreachable
+                // probe. current_model is re-derived alongside it so the two
+                // never disagree (mirrors BackendPool::update_resident_models).
+                st.resident_models = caps.models_loaded.clone();
+                st.current_model = caps.models_loaded.first().cloned();
                 st.healthy = true; // fresh ⇒ alive
                 if caps.vram_total_mb > 0 {
                     st.vram_total_mb = Some(caps.vram_total_mb);
@@ -94,6 +101,9 @@ impl AgentPoolSync {
                 // New entry: add, then set models, VRAM, and live telemetry.
                 pool.add(backend).await;
                 pool.update_models(&name, caps.models_loaded.clone()).await;
+                // Same true-residency signal as the update branch above.
+                pool.update_resident_models(&name, caps.models_loaded.clone())
+                    .await;
                 if caps.vram_total_mb > 0 {
                     pool.set_vram(&name, caps.vram_total_mb).await;
                 }
@@ -544,5 +554,61 @@ mod tests {
             Some(4096),
             "static max_context_len must not be altered by agent reconcile"
         );
+    }
+
+    /// AC4 (residency-signal.md): an agent heartbeat carrying
+    /// `models_loaded: ["a", "b"]` sets `resident_models == ["a", "b"]` on
+    /// reconcile — covers the add branch. AC6: `current_model` follows suit.
+    #[tokio::test]
+    async fn agent_add_sets_resident_models_from_models_loaded() {
+        let reg = NodeRegistry::new(Duration::from_secs(30));
+        let pool = Arc::new(BackendPool::new(vec![], 3, Duration::from_secs(30)));
+
+        let mut caps = sample_caps("resident-add");
+        caps.models_loaded = vec!["a".to_string(), "b".to_string()];
+        reg.heartbeat(caps).await.unwrap();
+        AgentPoolSync::reconcile(&reg, &pool).await;
+
+        let entry = pool.get("agent:resident-add").await.unwrap();
+        assert_eq!(entry.resident_models, vec!["a", "b"]);
+        assert_eq!(
+            entry.current_model,
+            Some("a".to_string()),
+            "AC6: current_model must equal resident_models.first()"
+        );
+    }
+
+    /// AC4 (update branch) + §7 failure-mode distinction: a live agent that
+    /// re-reports an EMPTY `models_loaded` on a later heartbeat must clear
+    /// `resident_models` to empty — a true "nothing resident" signal, not the
+    /// stale-keep behavior that applies to an unreachable probe.
+    #[tokio::test]
+    async fn agent_update_empty_models_loaded_clears_resident_models() {
+        let reg = NodeRegistry::new(Duration::from_secs(30));
+        let pool = Arc::new(BackendPool::new(vec![], 3, Duration::from_secs(30)));
+
+        let mut caps1 = sample_caps("resident-update");
+        caps1.models_loaded = vec!["a".to_string()];
+        reg.heartbeat(caps1).await.unwrap();
+        AgentPoolSync::reconcile(&reg, &pool).await;
+        assert_eq!(
+            pool.get("agent:resident-update")
+                .await
+                .unwrap()
+                .resident_models,
+            vec!["a"]
+        );
+
+        let mut caps2 = sample_caps("resident-update");
+        caps2.models_loaded = vec![];
+        reg.heartbeat(caps2).await.unwrap();
+        AgentPoolSync::reconcile(&reg, &pool).await;
+
+        let entry = pool.get("agent:resident-update").await.unwrap();
+        assert!(
+            entry.resident_models.is_empty(),
+            "an agent reporting empty models_loaded is a true signal, not stale-keep"
+        );
+        assert_eq!(entry.current_model, None);
     }
 }
