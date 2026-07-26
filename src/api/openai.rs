@@ -76,10 +76,9 @@ pub(crate) fn estimate_prompt_tokens(body: &[u8]) -> Option<u32> {
                 _ => {}
             }
         }
-    } else if let Some(prompt) = json.get("prompt").and_then(Value::as_str) {
-        chars += prompt.chars().count();
     } else {
-        return None;
+        let prompt = json.get("prompt").and_then(Value::as_str)?;
+        chars += prompt.chars().count();
     }
 
     if chars == 0 {

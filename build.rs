@@ -48,8 +48,13 @@ fn main() {
         if !full_path.exists() {
             continue;
         }
-        let contents = fs::read_to_string(&full_path)
-            .unwrap_or_else(|e| panic!("dashboard2 build: failed to read {}: {}", full_path.display(), e));
+        let contents = fs::read_to_string(&full_path).unwrap_or_else(|e| {
+            panic!(
+                "dashboard2 build: failed to read {}: {}",
+                full_path.display(),
+                e
+            )
+        });
 
         match wrapper {
             Wrapper::Raw => assembled.push_str(&contents),
