@@ -89,7 +89,7 @@ per-file integration runs.**
    touch `nodes/pool_sync.rs`. Worktrees would only relocate the conflict to merge time.
    Order is **#2 → #1**; the first genuine parallel pair is (#3, #4), both after #2.
 
-### Tooling defect found (NOT fixed — global file, needs a decision)
+### Tooling defect found and FIXED (2026-07-26)
 
 `~/.claude/hooks/scope_guard.py:84` resolves `.agent-scope.json` by walking up from
 **`cwd`**, not from the edited file's path:
@@ -99,24 +99,34 @@ triggers `find_manifest`'s repo-boundary break → returns `(None, None)` → **
 no-ops.** So the guard is inert for exactly the worktree-isolated parallel builders it
 exists to protect. Confirmed empirically: the builder probed an edit to `src/router/scored.rs`
 (out of scope) and was not blocked; it self-reported and reverted. The mandatory git scope
-gate still held, so nothing leaked. Fix is to resolve from the edited `file_path`'s parent
-(falling back to cwd for relative paths).
+gate still held, so nothing leaked.
+
+**Fixed:** new `resolve_manifest()` searches upward from the target **file** first, then
+falls back to cwd. Verified with an 8-case table run against the real hook (out-of-scope
+file in worktree → DENY, owned file → ALLOW, `new_under` → ALLOW, new file outside
+`new_under` → DENY, the manifest itself → DENY, cwd-inside-worktree → still DENY i.e. no
+regression, no-manifest-anywhere → ALLOW, non-write tool → ALLOW). All 8 pass.
+
+**Residual gap, documented in the hook's docstring, not closed:** if neither the target
+file nor cwd sits under a manifest — a worktree-scoped agent reaching sideways into the
+lead's checkout — no manifest is found and the write is allowed. The hook cannot see that
+the agent was scoped at all. That case remains the mandatory git scope gate's job.
 
 ### Next steps
 
-1. **Decide how #2 lands:** push `sprint/residency-signal` + open a PR (gets Windows CI,
-   which the `herd-scorer-phase4-complete` memory flags as a real process gap — main checks
-   are not required and stacked PRs have skipped Windows CI before, causing the Instant
-   underflow bug), or merge locally to `main`. Nothing is pushed yet.
-2. **Then #1 node-origin (M)** — including the new `herd status` subcommand. Rebase the
-   worktree onto whatever `main` becomes after #2 lands; do **not** stack it on
+1. **#2 is on PR https://github.com/tom-swift-tech/herd/pull/43** (`sprint/residency-signal`
+   → `main`), pushed 2026-07-26. Watch Windows CI specifically — the
+   `herd-scorer-phase4-complete` memory records main checks not being required and stacked
+   PRs skipping Windows CI, which is how the Instant-underflow bug shipped. `origin/main`
+   is now at `248c025` (the push also carried `4f605e7`, last session's dashboard2 Settings
+   commit, which had never been pushed).
+2. **Then #1 node-origin (M)** — including the new `herd status` subcommand. After #43
+   merges, rebase the worktree onto the new `main`; do **not** stack #1 on
    `sprint/residency-signal` (see the CI gap above). #1 edits `src/cli.rs`, which the
    uncommitted `herd fit` work also edits — the worktree keeps them apart, which is why
    `fit` does not need to land first.
 3. Then the first real parallel pair, (#3 pin-retirement, #4 residency-routing), one
-   worktree each, lead-resolved base SHA.
-4. Optional: fix `scope_guard.py` before the next parallel phase, since (#3, #4) is the
-   first slot that actually depends on it.
+   worktree each, lead-resolved base SHA. The scope guard now actually works for these.
 
 ### Gotchas that still stand for this track
 
