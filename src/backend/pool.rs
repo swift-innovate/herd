@@ -15,7 +15,27 @@ const MAX_LAST_SERVED: usize = 256;
 pub struct BackendState {
     pub config: Backend,
     pub healthy: bool,
+    /// Advertised / available models. Ollama: `/api/tags` (everything on
+    /// disk). llama-server & openai-compat: `/v1/models`. Agent: reported
+    /// `models_loaded`. Feeds the model catalog and the D2 allowlist filter.
+    /// This is availability, NOT residency — see `resident_models`.
     pub models: Vec<String>,
+    /// Models actually loaded and serving RIGHT NOW. Populated from
+    /// `/api/ps` (Ollama, all entries), `/v1/models` (llama-server /
+    /// openai-compat — it only ever serves what it loaded), or
+    /// `caps.models_loaded` (any agent-origin backend). The ONLY field any
+    /// router may filter on for placement decisions. Empty means "nothing
+    /// resident" (a true signal), never "unknown" — an unreachable/malformed
+    /// probe leaves this field UNCHANGED (stale-keep) rather than clearing it;
+    /// see `BackendPool::update_resident_models` and
+    /// `ModelDiscovery::discover_running`. Not assumed to be a subset of
+    /// `models`: a model pulled and run between two discovery ticks can
+    /// appear here before `/api/tags` is re-read.
+    pub resident_models: Vec<String>,
+    /// Retained for the API surface only (`/status`, `/admin/backends`).
+    /// Derived as `resident_models.first().cloned()` by
+    /// `BackendPool::update_resident_models` — never written directly, never
+    /// read by routing.
     pub current_model: Option<String>,
     pub gpu_metrics: Option<GpuMetrics>,
     pub failure_count: u32,
@@ -89,6 +109,7 @@ impl BackendPool {
                 config,
                 healthy: true,
                 models: Vec::new(),
+                resident_models: Vec::new(),
                 current_model: None,
                 gpu_metrics: None,
                 failure_count: 0,
@@ -204,11 +225,30 @@ impl BackendPool {
         }
     }
 
-    pub async fn update_current_model(&self, name: &str, model: Option<String>) {
+    /// Replaces `update_current_model`. Sets the FULL resident list (never
+    /// intersected with `models`) and re-derives `current_model` from it, so
+    /// the two fields can never disagree. Callers must pass every model the
+    /// probe reported resident, not an incremental delta. No-op for an
+    /// unknown backend name.
+    pub async fn update_resident_models(&self, name: &str, models: Vec<String>) {
         let mut backends = self.backends.write().await;
         if let Some(backend) = backends.iter_mut().find(|b| b.config.name == name) {
-            backend.current_model = model;
+            backend.current_model = models.first().cloned();
+            backend.resident_models = models;
         }
+    }
+
+    /// True residency predicate: is `model` actually loaded and serving on
+    /// `name` right now? Routers must call this (or read `resident_models`
+    /// directly), never `models.contains` — `models` is availability, not
+    /// residency. Returns `false` for an unknown backend name.
+    pub async fn is_resident(&self, name: &str, model: &str) -> bool {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .find(|b| b.config.name == name)
+            .map(|b| b.resident_models.iter().any(|m| m == model))
+            .unwrap_or(false)
     }
 
     /// Replace a backend's live config in place (GUI config overlay, #G2). The
@@ -376,6 +416,7 @@ impl BackendPool {
             config: backend,
             healthy: true,
             models: Vec::new(),
+            resident_models: Vec::new(),
             current_model: None,
             gpu_metrics: None,
             failure_count: 0,
@@ -674,5 +715,47 @@ mod tests {
 
         let selected = pool.get_by_priority_excluding(&excluded).await.unwrap();
         assert_eq!(selected.config.name, "low");
+    }
+
+    // ── AC6 (part) / §5 invariant: update_resident_models & is_resident ──────
+
+    #[tokio::test]
+    async fn update_resident_models_sets_list_and_derives_current_model() {
+        let pool = BackendPool::new(vec![make_backend("gpu1", 100)], 3, Duration::from_secs(60));
+
+        pool.update_resident_models("gpu1", vec!["a".into(), "b".into()])
+            .await;
+        let state = pool.get("gpu1").await.unwrap();
+        assert_eq!(state.resident_models, vec!["a", "b"]);
+        assert_eq!(
+            state.current_model,
+            Some("a".into()),
+            "current_model must equal resident_models.first()"
+        );
+
+        // Re-deriving from an empty list clears current_model too (a true
+        // "nothing resident" signal, not left stale).
+        pool.update_resident_models("gpu1", vec![]).await;
+        let state = pool.get("gpu1").await.unwrap();
+        assert!(state.resident_models.is_empty());
+        assert_eq!(state.current_model, None);
+    }
+
+    #[tokio::test]
+    async fn is_resident_reflects_resident_models_not_models() {
+        let pool = BackendPool::new(vec![make_backend("gpu1", 100)], 3, Duration::from_secs(60));
+
+        // `models` (availability) has it, but nothing is resident yet —
+        // is_resident must say false. Never intersect the two fields.
+        pool.update_models("gpu1", vec!["qwen3-32b".into()]).await;
+        assert!(!pool.is_resident("gpu1", "qwen3-32b").await);
+
+        pool.update_resident_models("gpu1", vec!["qwen3-32b".into()])
+            .await;
+        assert!(pool.is_resident("gpu1", "qwen3-32b").await);
+        assert!(!pool.is_resident("gpu1", "other-model").await);
+
+        // Unknown backend name is a safe false, not a panic.
+        assert!(!pool.is_resident("nope", "qwen3-32b").await);
     }
 }

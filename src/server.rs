@@ -1961,7 +1961,10 @@ async fn proxy_handler(
 // Status / metrics / analytics / other handlers
 // ---------------------------------------------------------------------------
 
-async fn status_handler(
+/// `pub` (rather than crate-private) so `tests/residency_signal.rs` (AC7) can
+/// mount and exercise the real handler over HTTP instead of re-implementing
+/// its JSON shape as a fixture that could silently drift from the real one.
+pub async fn status_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> axum::Json<serde_json::Value> {
     let config = state.config_snapshot().await;
@@ -1979,6 +1982,7 @@ async fn status_handler(
                 "models": backend.models,
                 "model_count": backend.models.len(),
                 "current_model": backend.current_model,
+                "resident_models": backend.resident_models,
                 "hot_models": backend.config.hot_models,
                 "idle_seconds": idle_secs,
                 "healthy": backend.healthy,
