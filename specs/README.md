@@ -14,14 +14,15 @@ Aligns Herd with the current architecture doctrine:
 
 | # | Spec | Depends on | Size |
 |---|------|-----------|------|
-| 1 | [node-origin.md](node-origin.md) | — | S |
+| 1 | [node-origin.md](node-origin.md) | — | M |
 | 2 | [residency-signal.md](residency-signal.md) | — | S |
 | 3 | [pin-retirement.md](pin-retirement.md) | 2 | M |
 | 4 | [residency-routing.md](residency-routing.md) | 2 | M |
 | 5 | [legacy-router-residency.md](legacy-router-residency.md) | 4 | L |
 | 6 | [model-classes.md](model-classes.md) | 2, 4, 5 | L |
 
-1 and 2 are independent and can land in any order. 2 is a hard prerequisite for
+1 and 2 are logically independent and can land in either order, but they are **not
+safely parallel** — see the build-prep note below. 2 is a hard prerequisite for
 everything downstream — see below. 4 changes routing semantics that 5 extends
 and 6 builds on. Each spec passes the spec-first gate independently; each is a
 self-contained build task for a coding agent.
@@ -88,6 +89,18 @@ model-classes' body rewrite has to move inside the proxy retry loop, because
 
 Specs #1–#5 deliver the doctrine in full. #6 is a feature on top of it and is
 safely deferrable — nothing in the first five depends on it.
+
+### Found during build prep (2026-07-26)
+
+**#1 and #2 are not parallelisable**, despite having no logical dependency. Both mutate
+`BackendState` (`pool.rs:15-42`), both add a field to the `/status` serialization
+(`server.rs:1981` + `api/admin.rs:53,78`), and both touch `nodes/pool_sync.rs` (#1 to
+stamp `Agent` origin at insert, #2 to read `caps.models_loaded`). Two builders on those
+files collide in the merge no matter how the briefs are scoped, so the sprint runs
+**#2 → #1 serially**. The first genuine parallel pair is (#3, #4), both after #2.
+
+**`herd status` does not exist**, so #1's CLI section was unbuildable as written — see
+node-origin.md §3. Director ruled to build the subcommand; #1 is now **M**, not S.
 
 ## Doctrine invariants (apply to every spec)
 

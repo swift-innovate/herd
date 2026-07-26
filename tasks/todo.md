@@ -106,19 +106,27 @@ driven by real Ollama pinning problems on the fleet. Reviewed against the repo
 Baseline at review time: `cargo check --all-targets` clean, v1.4.0, main @ `4f605e7`.
 Every line-number citation in `specs/` was verified against that SHA.
 
-Tree state: dashboard2 Phase 1 is committed (`4f605e7`). The `herd fit` work
-(`src/fit/`, `Cargo.toml`/`Cargo.lock`, `src/api/models.rs`, `src/cli.rs`,
-`src/daemon/capabilities.rs`, `src/lib.rs`, `src/main.rs`) is still uncommitted and
-untouched — land or park it before starting, since this sprint touches `src/router/`,
-`src/backend/`, `src/config.rs` and `src/server.rs` broadly and a mixed tree makes
-bisecting miserable.
+Tree state: dashboard2 Phase 1 is committed (`4f605e7`); the specs are committed
+(`da98274`, docs-only). The `herd fit` work (`src/fit/`, `Cargo.toml`/`Cargo.lock`,
+`src/api/models.rs`, `src/cli.rs`, `src/daemon/capabilities.rs`, `src/lib.rs`,
+`src/main.rs`) is still uncommitted and untouched.
+
+**Resolved (2026-07-26): the sprint runs in a git worktree, so the `fit` work does not
+need to land first.** `D:/projects/herd-sprint-residency` is a clean tree at `da98274`
+with none of the `fit` changes, which keeps each sprint slice bisectable without forcing
+a decision on `fit`. This matters concretely for #1: it edits `src/cli.rs`, which the
+uncommitted `fit` work also modifies — the only real overlap between the two tracks.
+`fit` still needs landing or parking eventually (it is Phase 2 dashboard work), just not
+as a precondition here.
 
 ### Sequencing (dependency-ordered; parallelism noted)
 
-- [ ] **#1 node-origin** (S) — `NodeOrigin` enum on `BackendState`, API + `herd status`
-      ORIGIN column. Independent; can run parallel to #2.
 - [ ] **#2 residency-signal** (S) — `resident_models` from `/api/ps` (all entries, not
-      `.first()`). **Prerequisite for #3–#6.** Independent of #1.
+      `.first()`). **Prerequisite for #3–#6.** IN PROGRESS: worktree
+      `D:/projects/herd-sprint-residency`, branch `sprint/residency-signal`, base `da98274`.
+- [ ] **#1 node-origin** (M, was S) — `NodeOrigin` enum on `BackendState`, `origin_of()`,
+      five insert sites, both ownership sweeps converted, API field, **plus a new
+      `herd status` subcommand** (see below). Runs AFTER #2 — not parallel with it.
 - [ ] **#3 pin-retirement** (M) — gate warmer + `inject_keep_alive` off by default,
       add startup unpin sweep. Needs #2. Independent of #4–#6 → parallel with #4.
 - [ ] **#4 residency-routing** (M) — `ModelGate::Strict` default, `RouteError`,
@@ -128,8 +136,15 @@ bisecting miserable.
 - [ ] **#6 model-classes** (L) — classes, `ModelQuery`, trait signature change, body
       rewrite inside the retry loop. Needs #2, #4, #5.
 
-Parallelisable pairs: (#1, #2) then (#3, #4). #5 and #6 are strictly serial after #4.
+Parallelisable pairs: **(#3, #4) only.** #5 and #6 are strictly serial after #4.
 Per global policy, ≥2 parallel builders ⇒ one git worktree each, lead-resolved base SHA.
+
+**(#1, #2) is NOT a safe parallel pair** — corrected 2026-07-26 during build prep. They
+have no logical dependency, but they collide on files: both mutate `BackendState`
+(`pool.rs:15-42`), both add a field to the `/status` payload (`server.rs:1981` and
+`api/admin.rs:53,78`), and both touch `nodes/pool_sync.rs` (#1 stamps `Agent` origin at
+insert, #2 reads `caps.models_loaded`). Disjoint file ownership is impossible here, so
+worktrees would just relocate the conflict to merge time. Order: **#2 → #1.**
 
 ### Why the sequence changed from the specs' original order
 
@@ -180,6 +195,15 @@ Original README ordered 1, 2 → 3 → 4 and sized residency-routing `M`. Review
       operator, costs one rename, and keeps runtime resolution deterministic for the
       late-appearing collision validation can't see. Also now explicit + testable:
       Herd ships zero classes and hardcodes zero class names (`model-classes.md` AC14).
+
+- [x] **`herd status` subcommand (#1).** The spec's §3 CLI block and AC5 assumed a
+      `herd status` command that **does not exist** — `Command` (`src/cli.rs:25`) is
+      `Serve | Agent | Publish | Fit` and there is no HTTP status client in `src/`.
+      Director ruled: **build it** as part of #1 rather than strike the CLI section.
+      #1 resizes S → M. Shape spec'd in `node-origin.md` §3 (read-only single
+      `GET /status`, `--url`/`--api-key`/`-c`/`--json`, NAME/ORIGIN/BACKEND/HEALTHY/
+      MODELS/CURRENT_MODEL columns, exit 0/1/2, no new table dependency) with
+      AC5a–AC5c added for the unreachable / 401 / `--json` paths.
 
 ### Still open (non-blocking)
 

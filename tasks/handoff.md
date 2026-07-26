@@ -1,21 +1,144 @@
 # Handoff — Herd
 
-**Base commit SHA:** `4f605e76c7767b7b330d2a9376aab7c690378e65` (`main`, HEAD — verified
-2026-07-26). Note this MOVED from the `a6cf4da` recorded in every prior entry below: the
-dashboard2 Phase 1 work has since been committed as `4f605e7`
-("feat(dashboard2): add Settings screen, complete Phase 1 read-only screen set"). Any
-"no commits made" line further down this file is stale for the dashboard track.
+**Base commit SHA (main):** `da982749c36df974bc648ab84ea4d7f9d44c990a` — `docs(specs): add
+Static Placement Doctrine sprint specs`, docs-only, verified 2026-07-26. Moved from
+`4f605e7`, which itself moved from the `a6cf4da` in older entries below. Any "no commits
+made" / "specs untracked" line further down is stale.
 
-**Working tree:** dirty, two unrelated pockets —
+**Sprint work is NOT on main.** It is on branch `sprint/residency-signal` in a separate
+worktree at `D:/projects/herd-sprint-residency`, two commits ahead of `da98274`:
+- `22af003` `feat(backend): add true resident_models signal, separate from availability` (spec #2)
+- `310aa2e` `fix(router): add resident_models to scored.rs test fixture` (integration fix, lead)
+
+Nothing has been pushed. `origin/main` is 1 behind local `main`.
+
+**Working tree (`D:/projects/herd`, main):** dirty, one pocket —
 - `src/fit/` + `Cargo.toml`/`Cargo.lock`/`src/api/models.rs`/`src/cli.rs`/
   `src/daemon/capabilities.rs`/`src/lib.rs`/`src/main.rs` — the `herd fit` model-fit-estimator
-  work (see `herd-fit-estimator` memory). Untouched for several sessions now; still uncommitted.
-- `specs/` (untracked) + `tasks/todo.md` — this session's spec review, below.
+  work (see `herd-fit-estimator` memory). Still uncommitted, untouched for several sessions.
 - `Dashboard redesign brief-handoff.zip` — design source, untracked, leave alone.
+- `specs/` and `tasks/` are now COMMITTED (were untracked in the prior entry).
 
-**Two active tracks.** The Static Placement Doctrine sprint (newest section, next) is
-planning-only so far — no code written. The dashboard redesign (everything from
-"Settings screen added" onward) is code-complete for Phase 1 and committed.
+**Worktree (`D:/projects/herd-sprint-residency`):** clean except untracked
+`.agent-scope.json` (lead-written builder scope manifest — leave it, do not commit it).
+
+**Two active tracks.** The Static Placement Doctrine sprint is now BUILDING (spec #2 done
+and verified; see next section). The dashboard redesign is code-complete for Phase 1 and
+committed.
+
+---
+
+## Static Placement Doctrine sprint — spec #2 BUILT and verified (this session)
+
+**Spec #2 (residency-signal) is complete, green, and committed on `sprint/residency-signal`.**
+It is the hard prerequisite for #3–#6, so the sprint is now unblocked.
+
+### What landed
+
+`BackendState.resident_models: Vec<String>` — models actually loaded and serving now,
+separate from `models` (availability). `update_current_model` replaced by
+`update_resident_models` (sets the full list, re-derives `current_model` as
+`.first().cloned()`); new `is_resident(name, model)` predicate. Populated per backend
+type: Ollama `/api/ps` **all entries** (the `.first()` truncation at the old
+`discovery.rs:240` was the core bug), llama-server/openai-compat `/v1/models`, agent-origin
+`caps.models_loaded` in `pool_sync.rs`. Exposed additively on `GET /status` and
+`BackendResponse`. `error_for_status()` added to both probes — a pre-`/api/ps` Ollama now
+fails the probe cleanly instead of parse-failing.
+
+Stale-keep implemented per §7: a failed/malformed probe leaves `resident_models`
+**unchanged** — never cleared, never falling back to `models`. WARN fires once per
+backend per healthy→failed transition via a `resident_probe_failed: Mutex<BTreeSet<String>>`
+on `ModelDiscovery`, not once per tick.
+
+### Verification status — proof, not claims
+
+- `cargo build`: clean.
+- `cargo test` (FULL suite, run by the lead after the fixture fix): **619 passed, 0 failed,
+  1 ignored** — 580 lib + 4/15/3/10/7 across the five integration files.
+- All of AC1–AC7 map to real assertions. Integration tests in `tests/residency_signal.rs`
+  (7); AC4 in `pool_sync.rs` unit tests; AC6 asserted inline in the AC1/AC3/AC4 tests.
+- AC2 failing-first→green proof exists as a paired test: `ac2_fails_against_the_old_first_only_behavior`
+  inlines the pre-fix `.first()` extraction against the same mock and shows the second
+  running model is unreachable through it.
+- `cargo clippy --lib` + per-test-target: 0 warnings in touched files. `cargo fmt --check`: clean.
+- Scope gate: builder's diff touched only its 6 owned paths.
+
+### The one non-obvious trap this slice hit — read before adding any BackendState field
+
+Adding a field to `BackendState` breaks `make_state` in **`src/router/scored.rs`'s own
+`#[cfg(test)]` module** (`scored.rs:972`, exhaustive struct literal → E0063). This does
+**not** show up in `cargo build`, and does **not** show up in `cargo test --test <file>`
+for any single integration file — only in targets that compile the lib's test cfg
+(`cargo test --lib`, bare `cargo test`, `--tests`, `--all-targets`). A slice can therefore
+look fully green while the full suite does not compile. Fixed in `310aa2e`.
+**Any future slice that adds a BackendState field must run bare `cargo test`, not just
+per-file integration runs.**
+
+### Sprint plan corrections made this session (both recorded in specs/ + todo.md)
+
+1. **`herd status` does not exist.** Spec #1 §3 and AC5 required an ORIGIN column on it,
+   but `Command` (`src/cli.rs:25`) is `Serve | Agent | Publish | Fit` and there is no HTTP
+   status client in `src/`. **Director ruled: build the subcommand as part of #1.** #1 is
+   now sized **M**, not S. Concrete shape spec'd in `node-origin.md` §3 (read-only single
+   `GET /status`; `--url`/`--api-key`/`-c`/`--json`; columns NAME/ORIGIN/BACKEND/HEALTHY/
+   MODELS/CURRENT_MODEL; exit 0 reachable / 1 unreachable / 2 HTTP error; no new table
+   dependency) with new AC5a–AC5c for the unreachable, 401, and `--json` paths.
+2. **(#1, #2) is NOT a safe parallel pair** — the old todo had it as the first parallel
+   slot. No logical dependency, but they collide on files: both mutate `BackendState`, both
+   add a field to the `/status` payload (`server.rs:1981` + `api/admin.rs:53,78`), and both
+   touch `nodes/pool_sync.rs`. Worktrees would only relocate the conflict to merge time.
+   Order is **#2 → #1**; the first genuine parallel pair is (#3, #4), both after #2.
+
+### Tooling defect found (NOT fixed — global file, needs a decision)
+
+`~/.claude/hooks/scope_guard.py:84` resolves `.agent-scope.json` by walking up from
+**`cwd`**, not from the edited file's path:
+`root, manifest = find_manifest(Path(data.get("cwd", ".")))`. A worktree-isolated builder's
+cwd is the *lead's* repo (`D:/projects/herd`), which has no manifest and whose `.git`
+triggers `find_manifest`'s repo-boundary break → returns `(None, None)` → **the hook
+no-ops.** So the guard is inert for exactly the worktree-isolated parallel builders it
+exists to protect. Confirmed empirically: the builder probed an edit to `src/router/scored.rs`
+(out of scope) and was not blocked; it self-reported and reverted. The mandatory git scope
+gate still held, so nothing leaked. Fix is to resolve from the edited `file_path`'s parent
+(falling back to cwd for relative paths).
+
+### Next steps
+
+1. **Decide how #2 lands:** push `sprint/residency-signal` + open a PR (gets Windows CI,
+   which the `herd-scorer-phase4-complete` memory flags as a real process gap — main checks
+   are not required and stacked PRs have skipped Windows CI before, causing the Instant
+   underflow bug), or merge locally to `main`. Nothing is pushed yet.
+2. **Then #1 node-origin (M)** — including the new `herd status` subcommand. Rebase the
+   worktree onto whatever `main` becomes after #2 lands; do **not** stack it on
+   `sprint/residency-signal` (see the CI gap above). #1 edits `src/cli.rs`, which the
+   uncommitted `herd fit` work also edits — the worktree keeps them apart, which is why
+   `fit` does not need to land first.
+3. Then the first real parallel pair, (#3 pin-retirement, #4 residency-routing), one
+   worktree each, lead-resolved base SHA.
+4. Optional: fix `scope_guard.py` before the next parallel phase, since (#3, #4) is the
+   first slot that actually depends on it.
+
+### Gotchas that still stand for this track
+
+- **Do not trust `BackendState.models` as residency.** Three sites still read it that way
+  and were deliberately left alone this slice: `scored.rs:346` (dim 1 `model_resident`
+  scoring), `scored.rs:663` (`ModelGate::Strict` filter), `pool.rs:278`
+  (`get_by_model_tagged_excluding`). Converting them is #4's and #5's job — #5 needs new
+  pool primitives to keep each legacy router's character. `residency-signal.md` §5 states a
+  grep invariant ("zero `models.contains` routing hits") that actually belongs to #4/#5, not
+  #2; a builder taking it literally would silently change routing behavior.
+- **Do not point the unpin sweep (#3) at `models`** — it would POST `keep_alive` to every
+  model on disk and load the entire library. Target `resident_models`, finite TTL, never
+  `keep_alive: 0` (that evicts).
+- `warm_model_recency` (dim 23) already defaults to 0.0. The dim that needs zeroing in #4 is
+  dim 1 `model_resident`, weight 5.0.
+- `ModelGate::Strict` already exists and already implements the hard filter
+  (`scored.rs:671-676`) — #4 is largely a default flip.
+- Pre-existing `.unwrap()` in library code at `discovery.rs` `ModelDiscovery::new`
+  (reqwest client build), untouched. `warmer.rs:21`/`:59` are slated for #3;
+  `weighted_round_robin.rs:61` for #5.
+- Four *distinct* user-visible breaks need four separate CHANGELOG entries (`specs/README.md`).
+  Spec #2 is additive and is **not** one of them.
 
 ---
 

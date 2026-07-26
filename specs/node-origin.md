@@ -62,6 +62,33 @@ CLI:
 herd status   → node table gains an ORIGIN column (values: static | enrolled | agent)
 ```
 
+**`herd status` does not exist yet** (found 2026-07-26, during build prep). `Command`
+(`src/cli.rs:25`) is `Serve | Agent | Publish | Fit`; there is no status subcommand and no
+HTTP status client anywhere in `src/`. The original spec assumed one. Director ruled
+(2026-07-26) to **build it as part of this spec** rather than strike the CLI section, so
+§3's CLI line is a new surface, not an additive column. This resizes the spec **S → M**.
+
+Concrete shape required:
+
+```
+herd status [--url <GATEWAY_URL>] [--api-key <KEY>] [-c <FILE>]
+
+  Default URL:      http://127.0.0.1:40114 (matches ServeArgs' default port)
+  Default API key:  HERD_API_KEY env var, else the key from -c <FILE> if given
+  Data source:      GET /status  (existing route, src/server.rs:664)
+  Output:           one row per backend, columns:
+                    NAME  ORIGIN  BACKEND  HEALTHY  MODELS  CURRENT_MODEL
+  Exit codes:       0 = gateway reachable; 1 = unreachable/refused;
+                    2 = HTTP error (401/5xx), message includes the status code
+```
+
+Constraints on the new subcommand:
+- Read-only. It issues exactly one `GET /status` and never mutates gateway state.
+- Plain aligned text on stdout, no new table/TUI dependency (`ROADMAP` convention:
+  no new deps without justification). `--json` passes the response through unmodified.
+- An unreachable gateway prints a diagnosable one-line error to stderr and exits 1 —
+  it must not print an empty table and exit 0.
+
 ## 4. Data shapes
 
 ```rust
@@ -134,6 +161,13 @@ Serialized example (`GET /api/status`, one backend):
   reconcile ticks, then its `origin` value never changes.
 - AC5. `herd status` output contains an ORIGIN column with the correct value
   for each of the three origins (integration test against a mock gateway).
+- AC5a. Given no gateway listening on the target URL, when `herd status` runs,
+  then it prints a one-line diagnosable error to stderr and exits **1** — not an
+  empty table with exit 0.
+- AC5b. Given a gateway that returns 401, when `herd status` runs, then the error
+  message names the status code and it exits **2**.
+- AC5c. `herd status --json` output deserializes to the same value as a direct
+  `GET /status` against the same fixture (pass-through, no reshaping).
 - AC6. A search of `src/` for prefix-based logic branches
   (`starts_with("agent:")` / `starts_with("node:")`) finds **only**
   `config.rs:1442` (reserved-prefix validation) and the four key-construction
