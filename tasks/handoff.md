@@ -1,11 +1,127 @@
-# Handoff — Dashboard redesign, Phase 1 (dashboard2)
+# Handoff — Herd
 
-**Base commit SHA:** `a6cf4da9d10ab4c6f16ad04d5a2153302a5587e1` (main, HEAD — re-verified at the start of this Settings slice, still current; no commits have landed on `main` since this branch of work started, so the SHA has been stable across every session in this handoff)
-**Working tree:** dirty — new/modified files below are uncommitted. Note: `git status` also
-shows unrelated uncommitted changes (`src/fit/`, `Cargo.toml`/`Cargo.lock`, `src/api/models.rs`,
-`src/cli.rs`, `src/daemon/capabilities.rs`, `src/lib.rs`, `src/main.rs`) from the prior `herd fit`
-model-fit-estimator work (see `herd-fit-estimator` memory) — pre-existing, not touched this
-session, left as-is.
+**Base commit SHA:** `4f605e76c7767b7b330d2a9376aab7c690378e65` (`main`, HEAD — verified
+2026-07-26). Note this MOVED from the `a6cf4da` recorded in every prior entry below: the
+dashboard2 Phase 1 work has since been committed as `4f605e7`
+("feat(dashboard2): add Settings screen, complete Phase 1 read-only screen set"). Any
+"no commits made" line further down this file is stale for the dashboard track.
+
+**Working tree:** dirty, two unrelated pockets —
+- `src/fit/` + `Cargo.toml`/`Cargo.lock`/`src/api/models.rs`/`src/cli.rs`/
+  `src/daemon/capabilities.rs`/`src/lib.rs`/`src/main.rs` — the `herd fit` model-fit-estimator
+  work (see `herd-fit-estimator` memory). Untouched for several sessions now; still uncommitted.
+- `specs/` (untracked) + `tasks/todo.md` — this session's spec review, below.
+- `Dashboard redesign brief-handoff.zip` — design source, untracked, leave alone.
+
+**Two active tracks.** The Static Placement Doctrine sprint (newest section, next) is
+planning-only so far — no code written. The dashboard redesign (everything from
+"Settings screen added" onward) is code-complete for Phase 1 and committed.
+
+---
+
+## Static Placement Doctrine sprint — specs reviewed and revised (this session)
+
+**Nothing was built. This session was spec work only.** No Rust changed;
+`cargo check --all-targets` was run once as a baseline and was clean.
+
+### What happened
+
+`specs/` arrived as four specs from a brainstorming session with Gage, motivated by real
+Ollama pinning problems on the fleet. I reviewed all four against the actual codebase.
+They were well-formed but written without reading the routing/discovery code, and three
+structural findings invalidated parts of them. The spec set is now six files, all
+gate-PASS. Full rationale is in `specs/README.md` § "Revised after a repo review"; the
+build plan with sequencing is in `tasks/todo.md` § "QUEUED — Static Placement Doctrine sprint".
+
+### The three findings that changed the plan
+
+1. **`resident` did not mean resident.** `BackendState.models` comes from `/api/tags` for
+   Ollama (`discovery.rs:206-211`) — everything on disk, not loaded. Every "hard residency
+   filter" in the sprint read that field, so as originally written the filter would have
+   dispatched to a node that then loads the model in the request path: doctrine's first
+   invariant violated *while every AC passed*. Also `current_model` keeps only `/api/ps`'s
+   `.first()` (`discovery.rs:240`) despite Ollama holding several models at once.
+   llama-server, openai-compat, and agent-origin nodes are all fine — directly-discovered
+   Ollama is the sole hole. → new spec `residency-signal.md`, prerequisite for the rest.
+
+2. **Pinning is two mechanisms; the spec retired the wrong one.** The warmer (background,
+   `hot_models`, 240s, `keep_alive: -1`) was gated off. `inject_keep_alive`
+   (`server.rs:1225`, called from the proxy at `:1504`) was not mentioned — and it stamps
+   `routing.default_keep_alive` into **every** proxied Ollama request. Both came from one
+   2026-03-13 plan (`docs/superpowers/plans/2026-03-13-keep-alive-hot-models.md`). Neither
+   ever *releases* a pin, and `-1` is indefinite and outlives the herd process.
+   → `warmer-retirement.md` **deleted**, replaced by `pin-retirement.md` (both mechanisms +
+   a startup unpin sweep).
+
+3. **Residency routing was one M-sized spec doing two jobs.** Three of five routers
+   (`priority.rs:21`, `least_busy.rs:21`, `weighted_round_robin.rs:27`) bind `_model` and
+   ignore it entirely — no fallback to remove, residency needed from scratch, plus pool
+   primitives that don't exist (the only model-filtered accessor,
+   `pool.rs:269-281`, orders by least-busy, so Priority/WRR can't keep their character).
+   → split into `residency-routing.md` (scored router + error contract) and
+   `legacy-router-residency.md` (the other four, sized L).
+
+### Two decisions the user took at the end of the session
+
+- **404 retry budget.** A model-endpoint 404 is placement drift, not transport failure:
+  its own budget of **exactly one re-route**, independent of `routing.retry_count`, and it
+  drops the model from that backend's `resident_models` so the pool self-heals and the
+  re-route can't re-pick it. Terminal state is 404 `model_not_resident`, never the generic
+  502. Spec'd in `residency-routing.md` §3a + AC11–AC14. Three defects this fixes:
+  (i) all-attempts-fail currently returns **502** (`server.rs:1946-1955`), so the 404
+  contract was unreachable even with `RouteError` added; (ii) the loop is
+  `0..=retry_count` (default 2 → 3 attempts), so both specs' "until candidates exhaust"
+  promises were unachievable; (iii) each 404 hop can trigger a *real* request-path load on
+  Ollama — the retry path reopened the hole the routing fix closes.
+- **Class name collisions are a startup error**, not silent shadowing, and Herd ships zero
+  classes / hardcodes zero class names (`model-classes.md` §5, §8, AC14). Rationale:
+  class taxonomies are inherently opinionated, so collisions are likely; both silent
+  resolutions are bad. A `class/` prefix namespace was considered and rejected on ergonomics.
+
+### Next steps
+
+1. Nothing in the sprint is started. Begin with **#1 node-origin** and/or **#2
+   residency-signal** — independent of each other, both sized S. #2 gates #3–#6.
+2. Per global policy, ≥2 parallel builders ⇒ one git worktree each, lead-resolved base SHA.
+   Sequencing and parallelisable pairs are in `tasks/todo.md`.
+3. `specs/` is **untracked** and this session's work is uncommitted. Committing it is a
+   clean, docs-only commit — but the tree also holds the unrelated `herd fit` changes, so
+   commit selectively (`specs/ tasks/todo.md tasks/handoff.md`), and branch off `main`
+   first per repo convention.
+4. Still open (non-blocking): whether the `Enrolled` node tier survives at all. The enum
+   makes deprecating it easy later, so it does not gate #1.
+
+### Gotchas for this track
+
+- **Do not trust `BackendState.models` as residency** anywhere in this sprint. That
+  conflation is the whole reason spec #2 exists, and `residency-routing.md` AC10 /
+  `legacy-router-residency.md` AC7 exist purely as regression guards against it returning.
+- **Do not point the unpin sweep at `models`** — it would POST a `keep_alive` to every
+  model on disk and load the entire library. It must target `resident_models` (live
+  `/api/ps`) and send a *finite* TTL, never `keep_alive: 0` (that evicts).
+- `warm_model_recency` (dim 23) **already** defaults to 0.0 (`config.rs:322`,
+  `scored.rs:927`) — the original spec's "was non-zero" was wrong. The dim that actually
+  needs zeroing is dim 1 `model_resident`, weight 5.0, the highest in the table.
+- `ModelGate::Strict` already exists and already implements the hard filter
+  (`scored.rs:671-676`) — spec #4 is largely a default flip, not new logic.
+- Four *distinct* user-visible breaks need four separate CHANGELOG entries — listed in
+  `specs/README.md`. Easy to collapse into one line; don't.
+
+### Verification status for this track
+
+- `cargo check --all-targets`: **clean** at `4f605e7` (run this session).
+- No tests run, no code changed — there was nothing to test. All claims above about
+  code behavior were read directly out of the files and are cited with line numbers.
+- Every line-number citation in the specs was verified against the tree at `4f605e7`.
+  If the tree moves, re-check them before trusting.
+
+---
+
+# Handoff (previous track) — Dashboard redesign, Phase 1 (dashboard2)
+
+**Status: Phase 1 code-complete and COMMITTED as `4f605e7`.** The per-session narrative
+below was written while the work was uncommitted; treat its "no commits made" claims as
+historical. Remaining work is the parity checklist (item 4 in "Next steps" at the bottom).
 
 ## Settings screen added (this session, on top of the Sessions slice below)
 

@@ -2,7 +2,7 @@
 
 > Scratchpad for in-flight work. Milestone tracking in `ROADMAP.md`.
 
-**Last updated:** 2026-07-17
+**Last updated:** 2026-07-26
 
 (Previous ACTIVE section — `herd fit` model fit estimator — complete, uncommitted per
 dashboard-redesign task doc; folds into Phase 2 below.)
@@ -94,6 +94,104 @@ Phase 2, backend-gated), but flag before building them — apply Ember tokens by
   config object rather than hardcoded to empty (old dashboard's `buildConfigFromForm()`
   always sent `{deny_file_patterns: [], deny_bash_patterns: [], allow_shell_commands: false}`
   regardless of existing values — a second instance of the same reset-on-save bug class).
+
+---
+
+## QUEUED — Static Placement Doctrine sprint
+
+Specs: `specs/` (6 files, all gate-PASS). Origin: brainstorming session with Gage;
+driven by real Ollama pinning problems on the fleet. Reviewed against the repo
+2026-07-26 — spec set revised, see `specs/README.md` § "Revised after a repo review".
+
+Baseline at review time: `cargo check --all-targets` clean, v1.4.0, main @ `4f605e7`.
+Every line-number citation in `specs/` was verified against that SHA.
+
+Tree state: dashboard2 Phase 1 is committed (`4f605e7`). The `herd fit` work
+(`src/fit/`, `Cargo.toml`/`Cargo.lock`, `src/api/models.rs`, `src/cli.rs`,
+`src/daemon/capabilities.rs`, `src/lib.rs`, `src/main.rs`) is still uncommitted and
+untouched — land or park it before starting, since this sprint touches `src/router/`,
+`src/backend/`, `src/config.rs` and `src/server.rs` broadly and a mixed tree makes
+bisecting miserable.
+
+### Sequencing (dependency-ordered; parallelism noted)
+
+- [ ] **#1 node-origin** (S) — `NodeOrigin` enum on `BackendState`, API + `herd status`
+      ORIGIN column. Independent; can run parallel to #2.
+- [ ] **#2 residency-signal** (S) — `resident_models` from `/api/ps` (all entries, not
+      `.first()`). **Prerequisite for #3–#6.** Independent of #1.
+- [ ] **#3 pin-retirement** (M) — gate warmer + `inject_keep_alive` off by default,
+      add startup unpin sweep. Needs #2. Independent of #4–#6 → parallel with #4.
+- [ ] **#4 residency-routing** (M) — `ModelGate::Strict` default, `RouteError`,
+      proxy 404/503 JSON contract, dim 1 weight → 0.0. Needs #2.
+- [ ] **#5 legacy-router-residency** (L) — residency for Priority/ModelAware/LeastBusy/
+      WRR + new pool primitives. Needs #4.
+- [ ] **#6 model-classes** (L) — classes, `ModelQuery`, trait signature change, body
+      rewrite inside the retry loop. Needs #2, #4, #5.
+
+Parallelisable pairs: (#1, #2) then (#3, #4). #5 and #6 are strictly serial after #4.
+Per global policy, ≥2 parallel builders ⇒ one git worktree each, lead-resolved base SHA.
+
+### Why the sequence changed from the specs' original order
+
+Original README ordered 1, 2 → 3 → 4 and sized residency-routing `M`. Review found:
+
+- No true residency signal existed (Ollama `models` = `/api/tags` = on-disk), so the
+  hard filter would have permitted request-path loads while passing its own ACs. New
+  spec #2 inserted as a prerequisite.
+- Warmer retirement covered only half the pinning; `inject_keep_alive` in the request
+  path is the sharper violation. Spec rescoped and renamed (`warmer-retirement.md`
+  deleted → `pin-retirement.md`).
+- Residency routing was two jobs — three routers ignore `model` entirely and need it
+  built from scratch plus new pool primitives. Split #4 / #5, #5 sized L.
+
+### Verification gates (per global policy — proof, not claims)
+
+- [ ] Each spec's ACs green before its slice is called done
+- [ ] `cargo build && cargo test` clean at every slice boundary
+- [ ] AC-as-regression-guard for the residency conflation: a request for a model that
+      is on disk but not loaded on an Ollama backend must 404, not dispatch
+      (`residency-routing.md` AC10, `legacy-router-residency.md` AC7)
+- [ ] Four separate CHANGELOG entries — see `specs/README.md` § "Breaks requiring
+      CHANGELOG entries"; do not collapse into one line
+- [ ] README migration note: `model_warmer.enabled: true` / `routing.default_keep_alive: "5m"`
+      to restore legacy behavior
+- [ ] `warmer.rs:21` `.unwrap()` + `:59` `.expect()` removed during #3
+- [ ] `weighted_round_robin.rs:61` `.expect()` removed during #5
+
+### Decisions taken (2026-07-26)
+
+- [x] **404 retry budget (#4).** A model-endpoint 404 is placement drift, not transport
+      failure: it gets its own budget of **exactly one re-route**, independent of
+      `routing.retry_count`, and drops the model from that backend's `resident_models`
+      on the way through so the pool self-heals and the re-route can't re-pick it.
+      Terminal state is 404 `model_not_resident`, never the generic 502.
+      Spec'd in `residency-routing.md` §3a + AC11–AC14.
+      Three defects this fixes, all found while spec'ing it:
+      (i) all-attempts-fail currently returns **502** (`server.rs:1946-1955`), so the
+      404 contract would have been false even with `RouteError` added;
+      (ii) the loop is `0..=retry_count` (default 2 → 3 attempts), so both #4's and
+      #6's "until candidates exhaust" promises were unachievable;
+      (iii) each 404 hop can trigger a *real* request-path load on Ollama — the retry
+      path reopened the doctrine hole that the routing fix closes.
+- [x] **Class name collisions (#6).** Startup **error**, not silent shadowing. Everyone
+      has a different opinion about class taxonomies, so collisions are likely, and
+      both silent resolutions are bad (classes-win hides a real model; models-win makes
+      resolution depend on what's loaded right now). Erroring hands the call to the
+      operator, costs one rename, and keeps runtime resolution deterministic for the
+      late-appearing collision validation can't see. Also now explicit + testable:
+      Herd ships zero classes and hardcodes zero class names (`model-classes.md` AC14).
+
+### Still open (non-blocking)
+
+- [ ] **#1:** whether the `Enrolled` tier survives at all. The enum makes deprecation
+      easy later (delete a variant, compiler finds consumers) — no need to decide
+      before #1 lands.
+
+### Note on #6 sequencing
+
+Specs #1–#5 deliver the doctrine in full; #6 is a feature built on top of it. It is
+also the L-sized, most opinion-heavy item. If class design attracts debate, ship #1–#5
+and let #6 settle separately — nothing in the first five depends on it.
 
 ---
 
