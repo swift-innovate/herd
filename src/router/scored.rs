@@ -973,6 +973,10 @@ mod tests {
             config: make_backend(name, priority),
             healthy,
             models: Vec::new(),
+            // Left empty deliberately: these fixtures set `models` and the scorer's
+            // dim 1 still reads it. Residency becomes a routing input in spec #4
+            // (residency-routing), which is where these fixtures grow real values.
+            resident_models: Vec::new(),
             current_model: None,
             gpu_metrics: None,
             failure_count: 0,
