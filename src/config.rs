@@ -45,6 +45,9 @@ pub struct Config {
     pub budget: BudgetConfig,
 
     #[serde(default)]
+    pub supervisor: SupervisorConfig,
+
+    #[serde(default)]
     pub discovery: DiscoveryConfig,
 
     #[serde(default)]
@@ -914,6 +917,32 @@ fn default_budget_period() -> String {
 }
 fn default_budget_action() -> String {
     "reject".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupervisorConfig {
+    /// Enable the supervisor subsystem (agent-native process semantics).
+    /// Default: false (zero overhead when disabled).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Default attention budget in tokens for new agents.
+    /// Default: 100000 tokens.
+    #[serde(default = "default_attention_tokens")]
+    pub default_attention_tokens: u32,
+}
+
+impl Default for SupervisorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_attention_tokens: default_attention_tokens(),
+        }
+    }
+}
+
+fn default_attention_tokens() -> u32 {
+    100_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
