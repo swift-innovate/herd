@@ -159,6 +159,8 @@ pub struct AppState {
     /// Phase-4 session→backend affinity store (dim 18).
     /// Updated on the post-request hook; read by `ScoredRouter` on the scoring path.
     pub session_affinity: Arc<SessionAffinity>,
+    /// Supervisor subsystem for agent-native process semantics (disabled by default).
+    pub supervisor: Option<Arc<crate::supervisor::Supervisor>>,
 }
 
 impl AppState {
@@ -544,6 +546,15 @@ impl Server {
             crate::providers::rate_limit::ProviderRateLimiter::new(&self.config.providers),
         ));
 
+        let supervisor = if self.config.supervisor.enabled {
+            let sup = crate::supervisor::Supervisor::new(
+                self.config.supervisor.default_attention_tokens,
+            );
+            Some(Arc::new(sup))
+        } else {
+            None
+        };
+
         let state = AppState {
             pool: Arc::clone(&pool),
             router: Arc::new(tokio::sync::RwLock::new(router)),
@@ -567,6 +578,7 @@ impl Server {
             config_path: self.config_path.clone(),
             routing_stats,
             session_affinity,
+            supervisor,
         };
 
         // Start session reaper and audit log cleanup (every 5 minutes)
@@ -2523,6 +2535,7 @@ mod tests {
             config_path: Some(temp_path.clone()),
             routing_stats,
             session_affinity,
+            supervisor: None,
         };
 
         let message = state.reload_config().await.unwrap();
@@ -2619,6 +2632,7 @@ mod tests {
             config_path: Some(config_path),
             routing_stats,
             session_affinity,
+            supervisor: None,
         }
     }
 

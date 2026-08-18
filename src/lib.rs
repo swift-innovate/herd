@@ -18,6 +18,7 @@ pub mod publish;
 pub mod rate_limit;
 pub mod router;
 pub mod server;
+pub mod supervisor;
 pub mod updater;
 
 pub use config::Config;

@@ -338,6 +338,37 @@ pub async fn chat_completions(
         crate::budget::BudgetStatus::Ok { .. } => {}
     }
 
+    let agent_id = if let Some(supervisor) = state.supervisor.as_ref() {
+        let session_key = headers
+            .get("x-herd-session")
+            .and_then(|v| v.to_str().ok())
+            .or_else(|| client_name.as_deref())
+            .unwrap_or("default");
+
+        let aid = supervisor.get_or_create_root().await;
+
+        match supervisor.check_budget(aid).await {
+            Ok(remaining) if remaining == 0 => {
+                return Err(openai_error_with_code(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "attention_exhausted",
+                    &format!(
+                        "Attention budget exhausted for agent {}",
+                        session_key
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Supervisor check failed: {:?}", e);
+            }
+        }
+
+        Some(aid)
+    } else {
+        None
+    };
+
     let request_tags = extract_tags(&headers);
     let profile_header = headers
         .get("x-herd-profile")
@@ -731,6 +762,13 @@ pub async fn chat_completions(
                 .budget
                 .record_cost(client_name.as_deref(), model, cost)
                 .await;
+
+            if let (Some(supervisor), Some(aid)) = (state.supervisor.as_ref(), agent_id) {
+                let total_tokens = tin + tout;
+                if let Err(e) = supervisor.charge_tokens(aid, total_tokens).await {
+                    tracing::warn!("Failed to charge attention tokens: {:?}", e);
+                }
+            }
         }
 
         let body = axum::body::Body::from(body_bytes);
